@@ -22,12 +22,21 @@ interface ToolStatusProps {
   error?: string;
 }
 
+export function formatCalculatorExpression(expression: string): string {
+  return expression.split("").map((character) => {
+    if (character === "*") return "\u00d7";
+    if (character === "/") return "\u00f7";
+    return character;
+  }).join("");
+}
+
 export function ToolStatusIndicator({ name, status, query, url, citations = [], error }: ToolStatusProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const isSearch = name === "webSearch";
-  const label = isSearch ? "Web Search" : "URL Reader";
-  const displayTarget = isSearch ? `"${query}"` : url;
+  const isCalculator = name === "calculator";
+  const isDateTime = name === "currentDateTime";
+  const label = isCalculator ? "Calculator" : isDateTime ? "Current date & time" : "Tool";
+  const displayTarget = isCalculator ? formatCalculatorExpression(query || "") : url;
 
   // Render active streaming states (not completed yet)
   if (status === "searching" || status === "reading_url" || status === "processing") {
@@ -38,10 +47,10 @@ export function ToolStatusIndicator({ name, status, query, url, citations = [], 
         </div>
         <div className="space-y-0.5">
           <p className="font-medium text-foreground flex items-center gap-1.5">
-            {isSearch ? <Search className="w-3.5 h-3.5 text-zinc-500" /> : <LinkIcon className="w-3.5 h-3.5 text-zinc-500" />}
-            {status === "searching" && "Searching the web..."}
-            {status === "reading_url" && "Fetching webpage..."}
-            {status === "processing" && "Synthesizing content..."}
+            {isCalculator ? <Search className="w-3.5 h-3.5 text-zinc-500" /> : <LinkIcon className="w-3.5 h-3.5 text-zinc-500" />}
+            {status === "searching" && `Running ${label.toLowerCase()}...`}
+            {status === "reading_url" && `Preparing ${label.toLowerCase()}...`}
+            {status === "processing" && "Preparing response..."}
           </p>
           <p className="text-[10px] font-mono text-muted-foreground max-w-sm truncate">
             {displayTarget}
@@ -68,6 +77,24 @@ export function ToolStatusIndicator({ name, status, query, url, citations = [], 
     );
   }
 
+  // Deterministic internal tools are results, not sources. Never route them
+  // through the generic citation/document renderer.
+  if (isCalculator || isDateTime) {
+    return (
+      <div className="max-w-fit rounded-xl border border-border/60 bg-muted/15 px-3 py-2 text-xs select-none">
+        <div className="flex items-center gap-2 text-foreground/90">
+          <CheckCircle2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+          <span className="font-medium">{label}</span>
+        </div>
+        {displayTarget && (
+          <p className="mt-1 pl-5.5 font-mono text-[10.5px] text-muted-foreground break-words">
+            {displayTarget}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   // Render completed states (expandable pill)
   const hasDetails = citations && citations.length > 0;
 
@@ -84,7 +111,7 @@ export function ToolStatusIndicator({ name, status, query, url, citations = [], 
         <div className="flex items-center gap-2 truncate">
           <CheckCircle2 className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
           <span className="font-medium text-foreground/90 shrink-0">
-            {isSearch ? "Searched the web for" : "Read website source"}
+            {label}
           </span>
           <span className="font-mono text-[10.5px] truncate max-w-[280px] text-muted-foreground">
             {displayTarget}

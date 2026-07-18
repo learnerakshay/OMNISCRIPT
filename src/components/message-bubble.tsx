@@ -9,7 +9,7 @@ import { CodeBlock } from "./code-block";
 import { useAccent } from "../providers/accent-provider";
 import { ThinkingSkeleton } from "./thinking-skeleton";
 import { useUserSettings } from "../providers/settings-provider";
-import { ToolStatusIndicator, CitationFooter } from "./tool-status";
+import { ToolStatusIndicator, CitationFooter, formatCalculatorExpression } from "./tool-status";
 
 interface MessageBubbleProps {
   message: Message;
@@ -81,6 +81,13 @@ export function MessageBubble({
 
   const activeToolCall = isStreaming ? streamingToolCall : (isOmniscriptJSON ? parsedData.toolCall : null);
   const activeCitations = isStreaming ? streamingCitations : (isOmniscriptJSON ? parsedData.citations : null);
+  const isInternalTool = activeToolCall?.name === "calculator" || activeToolCall?.name === "currentDateTime";
+  const calculatorExpression = activeToolCall?.name === "calculator" && typeof activeToolCall.query === "string"
+    ? activeToolCall.query
+    : null;
+  const renderedDisplayText = calculatorExpression
+    ? displayText.split(calculatorExpression).join(formatCalculatorExpression(calculatorExpression))
+    : displayText;
 
   return (
     <motion.div
@@ -312,7 +319,7 @@ export function MessageBubble({
                       },
                     }}
                   >
-                    {displayText}
+                    {renderedDisplayText}
                   </ReactMarkdown>
 
                   {isStreaming && (
@@ -322,7 +329,7 @@ export function MessageBubble({
               )}
 
               {/* If we have completed persistent citations, show the Verified References footer */}
-              {!isStreaming && isOmniscriptJSON && parsedData.citations && parsedData.citations.length > 0 && (
+              {!isStreaming && !isInternalTool && isOmniscriptJSON && parsedData.citations && parsedData.citations.length > 0 && (
                 <CitationFooter citations={parsedData.citations} />
               )}
             </div>

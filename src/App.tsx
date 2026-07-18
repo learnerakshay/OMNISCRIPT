@@ -48,6 +48,18 @@ import { MessageBubble } from "@/components/message-bubble";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { useSounds } from "./hooks/use-sounds";
 
+const TITLE_STOP_WORDS = new Set(["a", "an", "and", "are", "be", "brief", "can", "explain", "give", "in", "is", "it", "me", "of", "please", "tell", "the", "to", "what", "with", "you"]);
+
+function createConciseTitle(prompt: string): string {
+  const normalized = prompt.replace(/[^a-zA-Z0-9/]+/g, " ").trim();
+  const lower = normalized.toLowerCase();
+  if (/(calculate|calculation)/.test(lower) && /time/.test(lower)) return "Calculation and Time";
+  const timezoneMatch = normalized.match(/(?:in|time)\s+[A-Za-z]+\/([A-Za-z_]+)/i);
+  if (/time/.test(lower) && timezoneMatch) return `${timezoneMatch[1].replace(/_/g, " ")} Time`;
+  const words = normalized.split(/\s+/).filter((word) => word.length > 1 && !TITLE_STOP_WORDS.has(word.toLowerCase()));
+  return words.slice(0, 3).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ") || "New Conversation";
+}
+
 export default function App() {
   const { user, isLoaded } = useUser();
   const { getToken } = useAuth();
@@ -272,10 +284,7 @@ export default function App() {
     try {
       // If no active conversation, auto-create one first
       if (!activeId) {
-        const titleLength = 35;
-        const autoTitle = cleanText.length > titleLength 
-          ? `${cleanText.slice(0, titleLength)}...` 
-          : cleanText;
+        const autoTitle = createConciseTitle(cleanText);
           
         const newConv = await createConversation.mutateAsync({ title: autoTitle });
         activeId = newConv.id;

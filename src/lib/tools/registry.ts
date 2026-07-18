@@ -1,348 +1,89 @@
-import { FunctionDeclaration, Type } from "@google/genai";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { z } from "zod";
 
-// Interface for standard tools in our registry
-export interface ToolDefinition {
-  declaration: FunctionDeclaration;
-  execute: (args: any, signal?: AbortSignal) => Promise<any>;
+export type ToolName = "calculator" | "currentDateTime";
+export type ToolExecutionResult = { success: true; summary: string; result: Record<string, unknown> } | { success: false; error: string };
+
+export interface RegisteredTool<TInput> {
+  name: ToolName;
+  description: string;
+  parameters: z.ZodType<TInput>;
+  execute: (input: TInput, signal?: AbortSignal) => Promise<ToolExecutionResult>;
 }
 
-const FETCH_TIMEOUT_MS = 12_000;
-const MAX_RESPONSE_BYTES = 1_000_000;
-const MAX_REDIRECTS = 5;
+export const calculatorInputSchema = z.object({
+  expression: z.string().trim().min(1, "A calculator expression is required.").max(200)
+    .describe("The complete arithmetic expression to calculate, for example: 24 * 18."),
+});
+const dateTimeSchema = z.object({ timezone: z.string().trim().max(100).optional() });
 
-function logToolFailure(tool: string, error: unknown) {
-  const errorName = error instanceof Error ? error.name : "UnknownError";
-  console.error(JSON.stringify({ event: "tool_execution_failed", tool, errorName }));
+function calculate(expression: string): number {
+  const source = expression.replace(/\s+/g, "");
+  if (!/^[0-9.+\-*/()]+$/.test(source)) throw new Error("Only arithmetic operators and parentheses are supported.");
+  let index = 0;
+  const parseExpression = (): number => { let value = parseTerm(); while (source[index] === "+" || source[index] === "-") { const operator = source[index++]; const right = parseTerm(); value = operator === "+" ? value + right : value - right; } return value; };
+  const parseTerm = (): number => { let value = parseFactor(); while (source[index] === "*" || source[index] === "/") { const operator = source[index++]; const right = parseFactor(); if (operator === "/" && right === 0) throw new Error("Division by zero is not allowed."); value = operator === "*" ? value * right : value / right; } return value; };
+  const parseFactor = (): number => { const sign = source[index] === "-" ? (index++, -1) : 1; if (source[index] === "(") { index++; const value = parseExpression(); if (source[index++] !== ")") throw new Error("Malformed expression."); return sign * value; } const match = source.slice(index).match(/^(?:\d+\.?\d*|\.\d+)/); if (!match) throw new Error("Malformed expression."); index += match[0].length; return sign * Number(match[0]); };
+  const result = parseExpression(); if (index !== source.length || !Number.isFinite(result)) throw new Error("Malformed expression."); return result;
 }
 
-function isPrivateAddress(address: string): boolean {
-  const normalized = address.toLowerCase();
-  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+const registry: Record<ToolName, RegisteredTool<unknown>> = {
+  calculator: { name: "calculator", description: "Calculate one arithmetic expression. Always provide the full expression in the required expression field, for example { expression: '24 * 18' }.", parameters: calculatorInputSchema, async execute(input) { try { const { expression } = calculatorInputSchema.parse(input); const value = calculate(expression); return { success: true, summary: `${expression} = ${value}`, result: { expression, value } }; } catch (error) { return { success: false, error: error instanceof Error ? error.message : "Calculator failed." }; } } },
+  currentDateTime: { name: "currentDateTime", description: "Get the current date and time, optionally for an IANA timezone.", parameters: dateTimeSchema, async execute(input) { try { const { timezone } = dateTimeSchema.parse(input); const usedTimezone = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone; const now = new Date(); const formatter = new Intl.DateTimeFormat("en-US", { timeZone: usedTimezone, dateStyle: "full", timeStyle: "long" }); const parts = new Intl.DateTimeFormat("en-US", { timeZone: usedTimezone, dateStyle: "medium", timeStyle: "medium" }).formatToParts(now); const date = parts.filter((part) => ["month", "day", "year"].includes(part.type)).map((part) => part.value).join(" "); const time = parts.filter((part) => ["hour", "minute", "second", "dayPeriod"].includes(part.type)).map((part) => part.value).join(""); return { success: true, summary: formatter.format(now), result: { isoTimestamp: now.toISOString(), readableDate: date, readableTime: time, timezone: usedTimezone } }; } catch { return { success: false, error: "Invalid IANA timezone." }; } } },
+};
 
-  if (mappedIpv4) {
-    return isPrivateAddress(mappedIpv4[1]);
-  }
+export function getToolDefinitions() { return Object.values(registry).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })); }
+export function isToolName(value: string): value is ToolName { return value in registry; }
+export function getRegisteredToolNames(): ToolName[] { return Object.keys(registry) as ToolName[]; }
 
-  if (isIP(normalized) === 4) {
-    const octets = normalized.split(".").map(Number);
-    const [first, second] = octets;
+type UnknownRecord = Record<string, unknown>;
+const asRecord = (value: unknown): UnknownRecord | null => typeof value === "object" && value !== null && !Array.isArray(value) ? value as UnknownRecord : null;
 
-    return first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      first >= 224 ||
-      (first === 100 && second >= 64 && second <= 127) ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && (second === 0 || second === 168)) ||
-      (first === 198 && (second === 18 || second === 19));
-  }
+export type NormalizedToolCall = { callId: string; toolName: string; arguments: unknown; rawKeys: string[] };
 
-  if (isIP(normalized) === 6) {
-    return normalized === "::" ||
-      normalized === "::1" ||
-      normalized.startsWith("fc") ||
-      normalized.startsWith("fd") ||
-      normalized.startsWith("fe80:");
-  }
+export function normalizeToolCall(rawCall: unknown): { success: true; call: NormalizedToolCall } | { success: false; error: string; rawKeys: string[]; toolName: string; rawArguments: unknown } {
+  const call = asRecord(rawCall);
+  const rawKeys = call ? Object.keys(call) : [];
+  if (!call) return { success: false, error: "Tool call is not an object.", rawKeys, toolName: "", rawArguments: undefined };
 
-  return true;
+  const functionPayload = asRecord(call.function);
+  const toolName = typeof call.toolName === "string"
+    ? call.toolName
+    : typeof functionPayload?.name === "string" ? functionPayload.name : "";
+  const callId = typeof call.toolCallId === "string"
+    ? call.toolCallId
+    : typeof call.callId === "string" ? call.callId : typeof call.id === "string" ? call.id : "";
+  const rawArguments = call.input ?? call.args ?? call.arguments ?? call.parsed_arguments ?? functionPayload?.arguments;
+  const argumentsValue = Array.isArray(rawArguments) && rawArguments.every((item) => typeof item === "string")
+    ? rawArguments.join("")
+    : rawArguments;
+
+  if (!callId || !toolName) return { success: false, error: "Tool call is missing its identifier or name.", rawKeys, toolName, rawArguments: argumentsValue };
+  if (argumentsValue === undefined) return { success: false, error: "Tool call is missing arguments.", rawKeys, toolName, rawArguments: argumentsValue };
+  return { success: true, call: { callId, toolName, arguments: argumentsValue, rawKeys } };
 }
 
-async function validatePublicUrl(rawUrl: string): Promise<URL> {
-  const url = new URL(rawUrl);
-
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error("Only HTTP and HTTPS URLs are allowed.");
-  }
-
-  if (url.username || url.password) {
-    throw new Error("URLs with embedded credentials are not allowed.");
-  }
-
-  if ((url.protocol === "http:" && url.port && url.port !== "80") ||
-      (url.protocol === "https:" && url.port && url.port !== "443")) {
-    throw new Error("Only standard HTTP and HTTPS ports are allowed.");
-  }
-
-  if (url.hostname.toLowerCase() === "localhost") {
-    throw new Error("Local network URLs are not allowed.");
-  }
-
-  const addresses = isIP(url.hostname)
-    ? [{ address: url.hostname }]
-    : await lookup(url.hostname, { all: true, verbatim: true });
-
-  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
-    throw new Error("The requested URL does not resolve to a public address.");
-  }
-
-  return url;
-}
-
-async function readPublicResponse(
-  rawUrl: string,
-  headers: HeadersInit,
-  signal?: AbortSignal
-): Promise<{ url: string; body: string }> {
-  const timeoutController = new AbortController();
-  const timeout = setTimeout(() => timeoutController.abort(), FETCH_TIMEOUT_MS);
-  const abortFromCaller = () => timeoutController.abort();
-  signal?.addEventListener("abort", abortFromCaller, { once: true });
-
-  try {
-    let currentUrl = rawUrl;
-
-    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-      const validatedUrl = await validatePublicUrl(currentUrl);
-      const response = await fetch(validatedUrl, {
-        headers,
-        redirect: "manual",
-        signal: timeoutController.signal,
-      });
-
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location) {
-          throw new Error("The URL redirected without a destination.");
-        }
-        currentUrl = new URL(location, validatedUrl).toString();
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new Error(`Request returned HTTP ${response.status}.`);
-      }
-
-      const contentLength = Number(response.headers.get("content-length"));
-      if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
-        throw new Error("The URL response exceeds the allowed size.");
-      }
-
-      if (!response.body) {
-        return { url: validatedUrl.toString(), body: "" };
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let bytesRead = 0;
-      let body = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        bytesRead += value.byteLength;
-        if (bytesRead > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
-          throw new Error("The URL response exceeds the allowed size.");
-        }
-
-        body += decoder.decode(value, { stream: true });
-      }
-
-      body += decoder.decode();
-      return { url: validatedUrl.toString(), body };
-    }
-
-    throw new Error("The URL exceeded the allowed number of redirects.");
-  } finally {
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", abortFromCaller);
-  }
-}
-
-// ----------------------------------------------------------------------------
-// Tool 1: Web Search
-// ----------------------------------------------------------------------------
-export const webSearchTool: ToolDefinition = {
-  declaration: {
-    name: "webSearch",
-    description: "Search the web for real-time information, current events, latest news, and public information.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        query: {
-          type: Type.STRING,
-          description: "The search query (e.g. 'SpaceX launch schedule', 'latest news about React 19')",
-        },
-      },
-      required: ["query"],
-    },
-  },
-  execute: async ({ query }: { query: string }, signal?: AbortSignal) => {
+export function parseToolArguments(name: string, rawArguments: unknown): { success: true; data: unknown } | { success: false; error: string } {
+  if (!isToolName(name)) return { success: false, error: "Unknown tool." };
+  let parsedArguments = rawArguments;
+  if (typeof rawArguments === "string") {
     try {
-      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      const { body: html } = await readPublicResponse(url, {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-      }, signal);
-      const results: Array<{ title: string; url: string; snippet: string }> = [];
-
-      // Parse DuckDuckGo html results safely using string splitting and regexes
-      const resultBlocks = html.split(/class="[^"]*web-result/g);
-      for (let i = 1; i < resultBlocks.length; i++) {
-        if (results.length >= 6) break;
-        const block = resultBlocks[i];
-
-        // Match the title link
-        const linkMatch = block.match(/<a\s+class="result__a"\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-        if (!linkMatch) continue;
-
-        let rawUrl = linkMatch[1];
-        let finalUrl = rawUrl;
-        
-        // Resolve redirect uddg URLs to direct URLs
-        if (rawUrl.includes("uddg=")) {
-          const uddgMatch = rawUrl.match(/uddg=([^&]+)/);
-          if (uddgMatch) {
-            finalUrl = decodeURIComponent(uddgMatch[1]);
-          }
-        }
-
-        const title = linkMatch[2].replace(/<\/?[^>]+(>|$)/g, "").trim();
-
-        // Match snippet description
-        const snippetMatch = block.match(/<a\s+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i) || 
-                             block.match(/<div\s+class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i);
-        const snippet = snippetMatch ? snippetMatch[1].replace(/<\/?[^>]+(>|$)/g, "").trim() : "";
-
-        if (title && finalUrl) {
-          results.push({
-            title,
-            url: finalUrl,
-            snippet: snippet || "No description available."
-          });
-        }
-      }
-
-      // Backup regex scraper if class names changed or are different
-      if (results.length === 0) {
-        const genericRegex = /<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>([\s\S]*?)(?:<br>|$)/gi;
-        let match;
-        while ((match = genericRegex.exec(html)) !== null && results.length < 5) {
-          const href = match[1];
-          if (href.startsWith("http") && !href.includes("duckduckgo")) {
-            const title = match[2].replace(/<\/?[^>]+(>|$)/g, "").trim();
-            const snippet = match[3].replace(/<\/?[^>]+(>|$)/g, "").trim();
-            if (title && href) {
-              results.push({ title, url: href, snippet });
-            }
-          }
-        }
-      }
-
-      return {
-        success: true,
-        query,
-        results: results.slice(0, 6)
-      };
-    } catch (error: any) {
-      logToolFailure("webSearch", error);
-      return {
-        success: false,
-        error: error.message || "Failed to search the web"
-      };
+      parsedArguments = JSON.parse(rawArguments) as unknown;
+    } catch {
+      return { success: false, error: "Tool arguments are not valid JSON." };
     }
-  },
-};
-
-// ----------------------------------------------------------------------------
-// Tool 2: URL Reader
-// ----------------------------------------------------------------------------
-export const urlReaderTool: ToolDefinition = {
-  declaration: {
-    name: "readUrl",
-    description: "Fetch and read the raw text contents of any given web page/URL to explain, summarize, or extract detailed information.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        url: {
-          type: Type.STRING,
-          description: "The absolute web page URL (e.g. 'https://nextjs.org/blog/next-15')",
-        },
-      },
-      required: ["url"],
-    },
-  },
-  execute: async ({ url }: { url: string }, signal?: AbortSignal) => {
-    try {
-      const { url: resolvedUrl, body: html } = await readPublicResponse(url, {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }, signal);
-
-      // Extrapolate page title
-      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-      const title = titleMatch ? titleMatch[1].trim() : "";
-
-      // Sanitize markup and isolate readable document body
-      let cleanText = html
-        .replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, "")
-        .replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, "")
-        .replace(/<head[^>]*>([\s\S]*?)<\/head>/gi, "")
-        .replace(/<svg[^>]*>([\s\S]*?)<\/svg>/gi, "")
-        .replace(/<nav[^>]*>([\s\S]*?)<\/nav>/gi, "")
-        .replace(/<footer[^>]*>([\s\S]*?)<\/footer>/gi, "")
-        .replace(/<header[^>]*>([\s\S]*?)<\/header>/gi, "");
-
-      cleanText = cleanText.replace(/<\/?[^>]+(>|$)/g, " ");
-      cleanText = cleanText
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-
-      cleanText = cleanText.replace(/\s+/g, " ").trim();
-
-      // Guard model context limitations by truncating extremely long documents
-      const maxLength = 15000;
-      const content = cleanText.length > maxLength 
-        ? cleanText.slice(0, maxLength) + " ... [Content truncated to prevent context overflow]" 
-        : cleanText;
-
-      return {
-        success: true,
-        url: resolvedUrl,
-        title,
-        content
-      };
-    } catch (error: any) {
-      logToolFailure("readUrl", error);
-      return {
-        success: false,
-        error: error.message || "Failed to parse and read the URL"
-      };
-    }
-  },
-};
-
-// ----------------------------------------------------------------------------
-// TOOL REGISTRY CENTRAL COMPILER & ROUTER
-// ----------------------------------------------------------------------------
-const registry: Record<string, ToolDefinition> = {
-  [webSearchTool.declaration.name]: webSearchTool,
-  [urlReaderTool.declaration.name]: urlReaderTool,
-};
-
-/**
- * Returns all registered FunctionDeclarations for Gemini configuration
- */
-export function getRegisteredTools() {
-  return Object.values(registry).map(tool => tool.declaration);
-}
-
-/**
- * Dispatches and executes a tool from the registry with standard inputs
- */
-export async function executeTool(name: string, args: any, signal?: AbortSignal): Promise<any> {
-  const tool = registry[name];
-  if (!tool) {
-    throw new Error(`Tool "${name}" is not registered in the OMNISCRIPT Tool Registry.`);
   }
-  return await tool.execute(args, signal);
+  const result = registry[name].parameters.safeParse(parsedArguments);
+  if (name === "calculator") {
+    console.info(JSON.stringify({
+      event: "calculator_input_validation",
+      rawInput: rawArguments,
+      parsedInput: parsedArguments,
+      valid: result.success,
+      validationError: result.success ? undefined : result.error.issues[0]?.message,
+    }));
+  }
+  return result.success
+    ? { success: true, data: result.data }
+    : { success: false, error: result.error.issues[0]?.message || "Tool arguments are invalid." };
 }
+export async function executeTool(name: string, input: unknown, signal?: AbortSignal): Promise<ToolExecutionResult> { if (!isToolName(name)) return { success: false, error: "Unknown tool." }; if (signal?.aborted) return { success: false, error: "Tool execution was cancelled." }; return registry[name].execute(input, signal); }

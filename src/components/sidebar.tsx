@@ -230,7 +230,7 @@ export function Sidebar({
               ) : (
                 <div className="flex flex-col justify-center">
                   <div className="flex items-start justify-between gap-1.5 w-full">
-                    <p className={`text-[11px] sm:text-xs font-medium leading-normal break-words line-clamp-2 pr-8 ${isSelected ? "text-foreground font-semibold" : "text-zinc-700 dark:text-zinc-300 group-hover:text-foreground"}`}>
+                    <p className={`min-w-0 text-[11px] sm:text-xs font-medium leading-normal break-words line-clamp-2 ${isSelected ? "text-foreground font-semibold" : "text-zinc-700 dark:text-zinc-300 group-hover:text-foreground"}`}>
                       {conv.title || "Untitled Chat"}
                     </p>
                     {isPinned && (
@@ -249,24 +249,24 @@ export function Sidebar({
 
           {/* Desktop Hover Quick Actions */}
           {!isCollapsed && !isEditing && (
-            <div className="absolute right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1.5 bg-gradient-to-l from-card via-card/95 to-transparent pl-4 py-1 rounded-r-xl transition-all duration-200 transform translate-x-1 group-hover:translate-x-0 group-focus-within:translate-x-0">
+            <div className="shrink-0 w-[92px] flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
               <button
                 onClick={(e) => handleTogglePin(e, conv.id)}
-                className="shrink-0 p-1.5 rounded-md shadow-none text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors duration-150 cursor-pointer"
+                className="shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground hover:text-foreground hover:-translate-y-px transition-[color,transform] duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-ring"
                 title={isPinned ? "Unpin Chat" : "Pin Chat"}
               >
                 <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-current text-amber-500" : ""}`} />
               </button>
               <button
                 onClick={(e) => handleStartEdit(e, conv.id, conv.title || "")}
-                className="shrink-0 p-1.5 rounded-md shadow-none text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors duration-150 cursor-pointer"
+                className="shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground hover:text-foreground hover:-translate-y-px transition-[color,transform] duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-ring"
                 title="Rename Chat"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={(e) => handleDeleteTrigger(e, conv.id)}
-                className="shrink-0 p-1.5 rounded-md shadow-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors duration-150 cursor-pointer"
+                className="shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground hover:text-destructive hover:-translate-y-px transition-[color,transform] duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-ring"
                 title="Delete Chat"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -482,9 +482,9 @@ export function Sidebar({
 
             {/* Recents Section */}
             <div className="space-y-1">
-              {pinnedConvs.length > 0 && recentConvs.length > 0 && !isCollapsed && (
+              {recentConvs.length > 0 && !isCollapsed && (
                 <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
-                  <span>Recent</span>
+                  <span>Recents</span>
                 </div>
               )}
               {recentConvs.map((conv) => renderConversationItem(conv, false))}

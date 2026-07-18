@@ -3,7 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { verifyToken } from "@clerk/backend";
-import { generateText, streamText } from "ai";
+import { generateText, streamText, ModelMessage } from "ai";
 import { z } from "zod";
 import { getOpenAIModel, handleAIError } from "./src/lib/ai";
 import { 
@@ -21,7 +21,7 @@ import {
   serverDeleteBranch,
   ValidationError
 } from "./src/actions/chat-actions";
-import { executeTool } from "./src/lib/tools/registry";
+import { calculatorInputSchema, executeTool, getRegisteredToolNames, normalizeToolCall, parseToolArguments, ToolExecutionResult } from "./src/lib/tools/registry";
 
 // Vite loads .env.local for the browser, but the Express process is started by tsx.
 // Load local server configuration without overriding platform-injected environment variables.
@@ -104,12 +104,25 @@ function logStreamEvent(event: string, details: Record<string, string | number |
   console.error(JSON.stringify({ event, ...details }));
 }
 
-const webSearchParameters = z.object({
-  query: z.string().trim().min(1).max(500),
-});
+function buildToolContinuationMessages(messages: ModelMessage[], toolCallId: string, toolName: string, input: unknown, result: ToolExecutionResult): ModelMessage[] {
+  const output = result.success === true
+    ? { type: "text" as const, value: JSON.stringify(result.result) }
+    : { type: "error-text" as const, value: result.error };
+  const continuation: ModelMessage[] = [
+    ...messages,
+    { role: "assistant", content: [{ type: "tool-call", toolCallId, toolName, input }] },
+    { role: "tool", content: [{ type: "tool-result", toolCallId, toolName, output }] },
+  ];
+  continuation.forEach((message, index) => {
+    const content = typeof message.content === "string" ? message.content : message.content;
+    const parts = Array.isArray(content) ? content : [];
+    console.info(JSON.stringify({ event: "tool_continuation_prompt_shape", index, role: message.role, contentType: typeof content, contentPartTypes: parts.map((part) => typeof part === "object" && part !== null && "type" in part ? part.type : typeof part), toolCallIdPresent: parts.some((part) => typeof part === "object" && part !== null && "toolCallId" in part), toolNamePresent: parts.some((part) => typeof part === "object" && part !== null && "toolName" in part) }));
+  });
+  return continuation;
+}
 
 const readUrlParameters = z.object({
-  url: z.string().trim().url().max(2_048),
+  timezone: z.string().trim().max(100).optional(),
 });
 
 /**
@@ -334,7 +347,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
 
     // Format for Vercel AI SDK (USER -> user, ASSISTANT -> assistant)
     // Strip out JSON metadata from past assistant messages so the model gets clean context
-    const coreMessages = messages.map(msg => {
+    const coreMessages: ModelMessage[] = messages.map(msg => {
       let text = msg.content;
       if (msg.role === "ASSISTANT" && text.startsWith('{"omniscript":true')) {
         try {
@@ -350,18 +363,28 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
       };
     });
 
+    const calculatorToolDefinition = {
+      description: "Calculate arithmetic. Required input: { expression: string }, containing the complete expression such as 24 * 18.",
+      inputSchema: calculatorInputSchema,
+    };
+    console.info(JSON.stringify({
+      event: "calculator_tool_schema",
+      calculatorToolDefinitionKeys: Object.keys(calculatorToolDefinition),
+      calculatorSchemaPropertyNames: Object.keys(calculatorInputSchema.shape),
+      calculatorRequiredFields: ["expression"],
+    }));
+
     // 1. Ask OpenAI to analyze user prompt and decide if external tool calling is required
     const initialResponse = await generateText({
       model: getOpenAIModel(),
       messages: coreMessages,
-      system: "You are OMNISCRIPT, an ultra-premium, modern AI-powered software engineering partner. Provide elegant, production-ready, typed answers. Determine if a tool is required. If a tool like webSearch or readUrl is needed to answer, return the appropriate function call. Only call webSearch when you lack real-time or up-to-date knowledge about recent events, public details, or recent technological revisions. Only call readUrl if the user explicitly specifies a URL to read, analyze, explain, or summarize.",
+      system: "You are OMNISCRIPT. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {\"expression\":\"24 * 18\"}. Use currentDateTime only for current date/time requests. Answer normally otherwise.",
       tools: {
-        webSearch: {
-          description: "Search the web for real-time information, current events, latest news, and public information.",
-          parameters: webSearchParameters,
+        calculator: {
+          ...calculatorToolDefinition,
         } as any,
-        readUrl: {
-          description: "Fetch and read the raw text contents of any given web page/URL to explain, summarize, or extract detailed information.",
+        currentDateTime: {
+          description: "Get the current date and time for an optional IANA timezone.",
           parameters: readUrlParameters,
         } as any,
       } as any,
@@ -376,37 +399,44 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
     res.setHeader("Connection", "keep-alive");
 
     if (toolCalls && toolCalls.length > 0) {
-      const call = toolCalls[0] as { toolName?: unknown; args?: unknown; toolCallId?: unknown };
-      const toolName = typeof call?.toolName === "string" ? call.toolName : "";
-      const toolCallId = typeof call?.toolCallId === "string" ? call.toolCallId : "";
+      const normalizedCall = normalizeToolCall(toolCalls[0]);
 
-      if (!toolCallId || !toolName) {
+      if (normalizedCall.success === false) {
+        console.error(JSON.stringify({ event: "tool_call_rejected", rawToolCallKeys: normalizedCall.rawKeys, requestedToolName: normalizedCall.toolName || "missing", registeredToolNames: getRegisteredToolNames(), rawArgumentsType: typeof normalizedCall.rawArguments, rawArguments: normalizedCall.rawArguments, argumentFailure: normalizedCall.error }));
         writeSse(res, { error: "The AI returned an incomplete tool request. Please try again." });
         endSse(res);
         return;
       }
 
-      const parsedToolArgs = toolName === "webSearch"
-        ? webSearchParameters.safeParse(call.args)
-        : toolName === "readUrl"
-          ? readUrlParameters.safeParse(call.args)
-          : null;
+      const { toolName, callId: toolCallId, arguments: rawArguments, rawKeys } = normalizedCall.call;
 
-      if (!parsedToolArgs || !parsedToolArgs.success) {
-        writeSse(res, { error: "The AI requested an unsupported or invalid tool operation. Please try again." });
+      const parsedToolArgs = parseToolArguments(toolName, rawArguments);
+
+      if (parsedToolArgs.success === false) {
+        console.error(JSON.stringify({
+          event: "tool_call_rejected",
+          rawToolCallKeys: rawKeys,
+          requestedToolName: toolName,
+          registeredToolNames: getRegisteredToolNames(),
+          rawArgumentsType: typeof rawArguments,
+          rawArguments,
+          normalizedParsedArguments: undefined,
+          argumentFailure: parsedToolArgs.error,
+        }));
+        writeSse(res, { type: "stream_error", error: "The AI requested an unsupported or invalid tool operation. Please try again." });
         endSse(res);
         return;
       }
 
-      const toolArgs = parsedToolArgs.data as { query?: string; url?: string };
+      const toolArgs = parsedToolArgs.data as { expression?: string; timezone?: string };
 
-      if (toolName === "webSearch") {
-        const query = toolArgs.query || "";
+      if (toolName === "calculator") {
+        const query = toolArgs.expression || "";
         
         // Stream search initialization status
         writeSse(res, { 
           type: "status", 
-          name: "webSearch", 
+          name: "calculator", 
           status: "searching", 
           query 
         });
@@ -422,7 +452,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         // Stream analysis status
         writeSse(res, { 
           type: "status", 
-          name: "webSearch", 
+          name: "calculator", 
           status: "processing" 
         });
 
@@ -438,36 +468,12 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         });
 
         // Feed tool results back to the model in Vercel AI SDK format
-        const updatedMessages = [
-          ...coreMessages,
-          {
-            role: "assistant" as const,
-            content: [
-              {
-                type: "tool-call" as const,
-                toolCallId,
-                toolName,
-                args: toolArgs,
-              }
-            ]
-          },
-          {
-            role: "tool" as const,
-            content: [
-              {
-                type: "tool-result" as const,
-                toolCallId,
-                toolName,
-                result: toolResult,
-              }
-            ]
-          }
-        ];
+        const updatedMessages = buildToolContinuationMessages(coreMessages, toolCallId, toolName, toolArgs, toolResult);
 
         // Stream the final synthesized conversational response
         const { textStream } = await streamText({
           model: getOpenAIModel(),
-          messages: updatedMessages as any,
+          messages: updatedMessages,
           system: "You are OMNISCRIPT. Synthesize the provided tool results to answer the user's prompt with absolute precision. Incorporate the sources seamlessly and answer in elegant markdown. Do not repeat URLs verbatim in your text, as they will be displayed as neat citation elements. NEVER output raw JSON.",
           abortSignal: abortController.signal,
         });
@@ -485,7 +491,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
           omniscript: true,
           text: fullResponseText,
           toolCall: {
-            name: "webSearch",
+            name: "calculator",
             query,
             status: toolResult.success ? "completed" : "failed",
             error: toolResult.success ? undefined : toolResult.error
@@ -502,13 +508,13 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
           branchId: requestedBranchId
         });
 
-      } else if (toolName === "readUrl") {
-        const url = toolArgs.url || "";
+      } else if (toolName === "currentDateTime") {
+        const url = toolArgs.timezone || "";
 
         // Stream URL reader initialization status
         writeSse(res, { 
           type: "status", 
-          name: "readUrl", 
+          name: "currentDateTime", 
           status: "reading_url", 
           url 
         });
@@ -524,7 +530,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         // Stream analysis status
         writeSse(res, { 
           type: "status", 
-          name: "readUrl", 
+          name: "currentDateTime", 
           status: "processing" 
         });
 
@@ -540,36 +546,12 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         });
 
         // Feed tool results back to the model in Vercel AI SDK format
-        const updatedMessages = [
-          ...coreMessages,
-          {
-            role: "assistant" as const,
-            content: [
-              {
-                type: "tool-call" as const,
-                toolCallId,
-                toolName,
-                args: toolArgs,
-              }
-            ]
-          },
-          {
-            role: "tool" as const,
-            content: [
-              {
-                type: "tool-result" as const,
-                toolCallId,
-                toolName,
-                result: toolResult,
-              }
-            ]
-          }
-        ];
+        const updatedMessages = buildToolContinuationMessages(coreMessages, toolCallId, toolName, toolArgs, toolResult);
 
         // Stream the final summarized or analyzed answer
         const { textStream } = await streamText({
           model: getOpenAIModel(),
-          messages: updatedMessages as any,
+          messages: updatedMessages,
           system: "You are OMNISCRIPT. Process and synthesize the text content of the webpage provided in the tool results to address the user's prompt (e.g. summarize, explain, or answer questions). Cite the website. NEVER output raw JSON.",
           abortSignal: abortController.signal,
         });
@@ -587,7 +569,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
           omniscript: true,
           text: fullResponseText,
           toolCall: {
-            name: "readUrl",
+            name: "currentDateTime",
             url,
             status: toolResult.success ? "completed" : "failed",
             error: toolResult.success ? undefined : toolResult.error
