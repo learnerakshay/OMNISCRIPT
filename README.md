@@ -2,6 +2,38 @@
 
 OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combines authenticated conversations, streaming OpenAI responses, server-side tools including Tavily web search, and PostgreSQL-backed conversation branching.
 
+# 📸 Application Screenshots
+
+## Landing Page
+
+![Landing Page](assets/landing_pg.png)
+
+> The OMNISCRIPT landing workspace for starting a new persistent chat.
+
+## Hero Section
+
+![Hero Section](assets/Hero_section.png)
+
+> Suggested prompts and the chat composer in the empty-conversation experience.
+
+## Authentication
+
+![Clerk Sign In](assets/clerk_signin.png)
+
+> Clerk-powered sign-in screen for authenticated workspace access.
+
+## Chat Initialization
+
+![Chat Initialization](assets/init_animation.png)
+
+> Loading feedback while OMNISCRIPT prepares an assistant response.
+
+## Streaming Response
+
+![Streaming Response](assets/resp_animation.png)
+
+> The main chat workspace displaying streamed assistant output.
+
 ## Technology Stack
 
 ### Frontend
