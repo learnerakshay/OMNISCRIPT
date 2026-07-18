@@ -2,7 +2,6 @@ import { ReactNode } from "react";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { Sparkles, Key, ExternalLink, Settings, ShieldCheck } from "lucide-react";
 import { QueryProvider } from "./query-provider";
-import { ThemeProvider } from "./theme-provider";
 import { ToastProvider } from "./toast-provider";
 import { AccentProvider } from "./accent-provider";
 import { SettingsProvider } from "./settings-provider";
@@ -146,21 +145,12 @@ export function RootProvider({ children }: RootProviderProps) {
   return (
     <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
       <QueryProvider>
-        <ThemeProvider>
-          <AccentProvider>
-            <SettingsProvider>
-              <ToastProvider>
-                {/* 
-                  Global Provider Composition.
-                  ThemeProvider enables premium dark, light, and system themes across OMNISCRIPT.
-                */}
-                {children}
-              </ToastProvider>
-            </SettingsProvider>
-          </AccentProvider>
-        </ThemeProvider>
+        <AccentProvider>
+          <SettingsProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </SettingsProvider>
+        </AccentProvider>
       </QueryProvider>
     </ClerkProvider>
   );
 }
-

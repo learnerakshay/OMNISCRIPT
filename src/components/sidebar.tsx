@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useUser, SignOutButton } from "@clerk/clerk-react";
 import { LogoSymbol } from "./logo-symbol";
-import { ThemeToggle } from "./theme-toggle";
 import { motion, AnimatePresence } from "motion/react";
 import { useAccent } from "../providers/accent-provider";
 import { useToast } from "../providers/toast-provider";
@@ -496,10 +495,7 @@ export function Sidebar({
 
       {/* User Actions footer */}
       <div className="p-3 border-t border-border bg-zinc-50/70 dark:bg-muted/10 space-y-2">
-        {/* Row 1: Theme Switch & Settings button */}
-        <div className={`flex items-center gap-2 ${isCollapsed ? "flex-col justify-center" : "justify-between"}`}>
-          <ThemeToggle isCollapsed={isCollapsed} />
-          
+        <div className={isCollapsed ? "flex justify-center" : "flex justify-end"}>
           <button
             onClick={onOpenSettings}
             className={`p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors shadow-xs cursor-pointer ${isCollapsed ? "" : "shrink-0"}`}

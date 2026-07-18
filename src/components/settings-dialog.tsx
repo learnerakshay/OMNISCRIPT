@@ -7,9 +7,6 @@ import {
   Palette, 
   Volume2, 
   VolumeX, 
-  Monitor, 
-  Sun, 
-  Moon, 
   MessageSquare, 
   Accessibility as AccessibilityIcon, 
   Keyboard, 
@@ -22,7 +19,6 @@ import {
 } from "lucide-react";
 import { useUser } from "@clerk/clerk-react";
 import { useAccent, AccentColor } from "../providers/accent-provider";
-import { useTheme, Theme } from "../providers/theme-provider";
 import { useUserSettings, UserSettings } from "../providers/settings-provider";
 import { useToast } from "../providers/toast-provider";
 
@@ -36,7 +32,6 @@ type SettingsTab = "appearance" | "chat" | "accessibility" | "shortcuts" | "abou
 export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("appearance");
   const { user } = useUser();
-  const { theme, setTheme } = useTheme();
   const { accentColor, setAccentColor, classes } = useAccent();
   const { settings, updateSetting, resetSettings } = useUserSettings();
   const { toast } = useToast();
@@ -184,7 +179,6 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <button
                     onClick={() => {
                       resetSettings();
-                      setTheme("system");
                       setAccentColor("emerald");
                       toast({
                         title: "Settings Restored",
@@ -214,33 +208,6 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     {activeTab === "appearance" && (
                       <div className="space-y-5">
                         <div>
-                          <h3 className="text-sm font-semibold text-foreground">Theme Mode</h3>
-                          <p className="text-xs text-muted-foreground mt-0.5">Customize the visual mode of OMNISCRIPT.</p>
-                          
-                          <div className="grid grid-cols-3 gap-3 mt-3">
-                            {(["light", "dark", "system"] as Theme[]).map((t) => {
-                              const isSelected = theme === t;
-                              const Icon = t === "light" ? Sun : t === "dark" ? Moon : Monitor;
-                              return (
-                                <button
-                                  key={t}
-                                  onClick={() => setTheme(t)}
-                                  className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer text-center ${
-                                    isSelected 
-                                      ? "bg-card border-foreground/30 ring-2 ring-ring/5 text-foreground font-semibold" 
-                                      : "border-zinc-200 dark:border-border bg-zinc-50 dark:bg-muted/10 text-muted-foreground hover:bg-card hover:text-foreground"
-                                  }`}
-                                  type="button"
-                                >
-                                  <Icon className="w-4 h-4" />
-                                  <span className="text-[11px] capitalize">{t}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div className="border-t border-border/60 pt-4">
                           <h3 className="text-sm font-semibold text-foreground">Brand Accent Color</h3>
                           <p className="text-xs text-muted-foreground mt-0.5">Define focal highlights, buttons, and system indicators.</p>
                           
