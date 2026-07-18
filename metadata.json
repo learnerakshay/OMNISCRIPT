@@ -1,0 +1,6 @@
+{
+  "name": "OMNISCRIPT",
+  "description": "A professional, production-ready AI helper console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
