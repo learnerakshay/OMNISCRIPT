@@ -762,7 +762,7 @@ export default function App() {
                       </div>
 
                       {/* Prompt suggestion grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mx-auto w-full">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6 sm:mb-8 max-w-2xl mx-auto w-full">
                         {suggestedPrompts.map((item, index) => (
                           <button
                             key={index}

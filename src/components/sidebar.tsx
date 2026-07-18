@@ -73,6 +73,7 @@ export function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editVal, setEditVal] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [swipingId, setSwipingId] = useState<string | null>(null);
 
   // Load pinned state from localStorage
   const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
@@ -166,6 +167,7 @@ export function Sidebar({
     const isSelected = selectedId === conv.id;
     const isEditing = editingId === conv.id;
     const isDeleting = deletingId === conv.id;
+    const actionButtonClass = "shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground transition-[color,transform,background-color] duration-150 ease-out cursor-pointer hover:-translate-y-px hover:scale-[1.05] hover:text-foreground hover:bg-muted/20 focus:outline-hidden focus:ring-1 focus:ring-ring";
 
     return (
       <div
@@ -173,6 +175,7 @@ export function Sidebar({
         className="relative group w-full overflow-hidden rounded-xl"
       >
         {/* Swipe Quick Actions Behind Panel */}
+        {swipingId === conv.id && (
         <div className="absolute inset-0 bg-zinc-100 dark:bg-muted/40 rounded-xl flex items-center justify-end px-2.5 gap-1.5 z-0">
           <button
             onClick={(e) => handleTogglePin(e, conv.id)}
@@ -196,6 +199,7 @@ export function Sidebar({
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
+        )}
 
         {/* Swipeable Interactive foreground container */}
         <motion.div
@@ -203,6 +207,8 @@ export function Sidebar({
           dragDirectionLock
           dragConstraints={{ left: -110, right: 0 }}
           dragElastic={{ left: 0.05, right: 0 }}
+          onDragStart={() => setSwipingId(conv.id)}
+          onDragEnd={() => setSwipingId(null)}
           onClick={() => !isEditing && onSelect(conv.id)}
           className={`relative z-10 flex items-center gap-3 px-3.5 py-3 rounded-xl transition-all cursor-pointer bg-card border border-transparent select-none ${
             isSelected
@@ -252,21 +258,21 @@ export function Sidebar({
             <div className="shrink-0 w-[92px] flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
               <button
                 onClick={(e) => handleTogglePin(e, conv.id)}
-                className="shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground hover:text-foreground hover:-translate-y-px transition-[color,transform] duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-ring"
+                className={actionButtonClass}
                 title={isPinned ? "Unpin Chat" : "Pin Chat"}
               >
                 <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-current text-amber-500" : ""}`} />
               </button>
               <button
                 onClick={(e) => handleStartEdit(e, conv.id, conv.title || "")}
-                className="shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground hover:text-foreground hover:-translate-y-px transition-[color,transform] duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-ring"
+                className={actionButtonClass}
                 title="Rename Chat"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={(e) => handleDeleteTrigger(e, conv.id)}
-                className="shrink-0 p-1.5 rounded-md border-0 bg-transparent shadow-none text-muted-foreground hover:text-destructive hover:-translate-y-px transition-[color,transform] duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-ring"
+                className={`${actionButtonClass} hover:text-destructive hover:bg-destructive/10`}
                 title="Delete Chat"
               >
                 <Trash2 className="w-3.5 h-3.5" />
