@@ -173,24 +173,24 @@ export function Sidebar({
         className="relative group w-full overflow-hidden rounded-xl"
       >
         {/* Swipe Quick Actions Behind Panel */}
-        <div className="absolute inset-0 bg-zinc-100 dark:bg-muted/40 rounded-xl flex items-center justify-end px-3 gap-1 z-0">
+        <div className="absolute inset-0 bg-zinc-100 dark:bg-muted/40 rounded-xl flex items-center justify-end px-2.5 gap-1.5 z-0">
           <button
             onClick={(e) => handleTogglePin(e, conv.id)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer"
+            className="shrink-0 p-1.5 rounded-lg shadow-none text-muted-foreground hover:text-foreground hover:bg-card/80 transition-colors duration-150 cursor-pointer"
             title={isPinned ? "Unpin" : "Pin"}
           >
             <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-current text-amber-500" : ""}`} />
           </button>
           <button
             onClick={(e) => handleStartEdit(e, conv.id, conv.title || "")}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer"
+            className="shrink-0 p-1.5 rounded-lg shadow-none text-muted-foreground hover:text-foreground hover:bg-card/80 transition-colors duration-150 cursor-pointer"
             title="Rename"
           >
             <Edit3 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={(e) => handleDeleteTrigger(e, conv.id)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+            className="shrink-0 p-1.5 rounded-lg shadow-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors duration-150 cursor-pointer"
             title="Delete"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -249,24 +249,24 @@ export function Sidebar({
 
           {/* Desktop Hover Quick Actions */}
           {!isCollapsed && !isEditing && (
-            <div className="absolute right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1 bg-gradient-to-l from-card via-card/95 to-transparent pl-4 py-1 rounded-r-xl transition-all duration-200 transform translate-x-1 group-hover:translate-x-0 group-focus-within:translate-x-0">
+            <div className="absolute right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1.5 bg-gradient-to-l from-card via-card/95 to-transparent pl-4 py-1 rounded-r-xl transition-all duration-200 transform translate-x-1 group-hover:translate-x-0 group-focus-within:translate-x-0">
               <button
                 onClick={(e) => handleTogglePin(e, conv.id)}
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                className="shrink-0 p-1.5 rounded-md shadow-none text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors duration-150 cursor-pointer"
                 title={isPinned ? "Unpin Chat" : "Pin Chat"}
               >
                 <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-current text-amber-500" : ""}`} />
               </button>
               <button
                 onClick={(e) => handleStartEdit(e, conv.id, conv.title || "")}
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                className="shrink-0 p-1.5 rounded-md shadow-none text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors duration-150 cursor-pointer"
                 title="Rename Chat"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={(e) => handleDeleteTrigger(e, conv.id)}
-                className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                className="shrink-0 p-1.5 rounded-md shadow-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors duration-150 cursor-pointer"
                 title="Delete Chat"
               >
                 <Trash2 className="w-3.5 h-3.5" />

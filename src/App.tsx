@@ -121,6 +121,11 @@ export default function App() {
   } | null>(null);
   const [streamingCitations, setStreamingCitations] = useState<Array<{ title: string; url: string; snippet?: string }> | null>(null);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
+  const shouldShowLandingHero = !selectedConvId || (
+    !isLoadingMessages &&
+    !isStreaming &&
+    (messages?.length ?? 0) === 0
+  );
 
   // Auto-resize composer textarea height
   useEffect(() => {
@@ -667,7 +672,7 @@ export default function App() {
             >
               <div className="w-full max-w-3xl flex flex-col min-h-full">
                 <AnimatePresence mode="wait">
-                  {!selectedConvId ? (
+                  {shouldShowLandingHero ? (
                     /* EMPTY/LANDING STATE GREETINGS */
                     <motion.div
                       key="empty-state"
