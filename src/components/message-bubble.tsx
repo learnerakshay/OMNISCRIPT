@@ -1,6 +1,6 @@
 import { Message } from "@prisma/client";
 import { useUser } from "@clerk/clerk-react";
-import { Sparkles, Trash2, Copy, Check } from "lucide-react";
+import { Sparkles, Trash2, Copy, Check, GitBranch, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { motion } from "motion/react";
 import ReactMarkdown from "react-markdown";
@@ -14,6 +14,18 @@ import { ToolStatusIndicator, CitationFooter } from "./tool-status";
 interface MessageBubbleProps {
   message: Message;
   onDelete: (id: string) => void;
+  onBranch?: (id: string) => void;
+  isBranching?: boolean;
+  branchNavigation?: {
+    current: number;
+    total: number;
+    previousBranchId?: string;
+    nextBranchId?: string;
+    onSelect: (branchId: string) => void;
+    onDelete?: () => void;
+    canDelete?: boolean;
+    isSwitching?: boolean;
+  };
   isDeleting: boolean;
   isStreaming?: boolean;
   streamingToolCall?: {
@@ -28,6 +40,9 @@ interface MessageBubbleProps {
 export function MessageBubble({ 
   message, 
   onDelete, 
+  onBranch,
+  isBranching,
+  branchNavigation,
   isDeleting, 
   isStreaming,
   streamingToolCall,
@@ -325,6 +340,17 @@ export function MessageBubble({
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
+            {!isUser && onBranch && (
+              <button
+                onClick={() => onBranch(message.id)}
+                disabled={isBranching || isStreaming}
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Branch from here"
+                aria-label="Branch from this response"
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               onClick={() => onDelete(message.id)}
               disabled={isDeleting}
@@ -335,6 +361,28 @@ export function MessageBubble({
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
+          {branchNavigation && branchNavigation.total > 1 && (
+            <div className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground" aria-label={`Branch ${branchNavigation.current} of ${branchNavigation.total}`}>
+              <button
+                type="button"
+                onClick={() => branchNavigation.previousBranchId && branchNavigation.onSelect(branchNavigation.previousBranchId)}
+                disabled={!branchNavigation.previousBranchId || branchNavigation.isSwitching}
+                className="p-1 rounded-md hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed focus:outline-hidden focus:ring-1 focus:ring-ring"
+                aria-label="Previous branch"
+              ><ChevronLeft className="w-3.5 h-3.5" /></button>
+              <span className="min-w-8 text-center font-mono">{branchNavigation.current} / {branchNavigation.total}</span>
+              <button
+                type="button"
+                onClick={() => branchNavigation.nextBranchId && branchNavigation.onSelect(branchNavigation.nextBranchId)}
+                disabled={!branchNavigation.nextBranchId || branchNavigation.isSwitching}
+                className="p-1 rounded-md hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed focus:outline-hidden focus:ring-1 focus:ring-ring"
+                aria-label="Next branch"
+              ><ChevronRight className="w-3.5 h-3.5" /></button>
+              {branchNavigation.canDelete && branchNavigation.onDelete && (
+                <button type="button" onClick={branchNavigation.onDelete} disabled={branchNavigation.isSwitching} className="ml-1 p-1 rounded-md hover:bg-destructive/15 hover:text-destructive disabled:opacity-40 focus:outline-hidden focus:ring-1 focus:ring-ring" aria-label="Delete current branch" title="Delete current branch"><Trash2 className="w-3 h-3" /></button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </motion.div>

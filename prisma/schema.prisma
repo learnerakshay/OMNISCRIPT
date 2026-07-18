@@ -24,28 +24,63 @@ enum MessageRole {
 }
 
 model Conversation {
-  id        String    @id @default(uuid())
-  title     String    @default("New Conversation")
-  userId    String    @map("user_id")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  messages  Message[]
+  id             String               @id @default(uuid())
+  title          String               @default("New Conversation")
+  userId         String               @map("user_id")
+  activeBranchId String?              @map("active_branch_id")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  messages       Message[]
+  branches       ConversationBranch[] @relation("ConversationBranches")
+  activeBranch   ConversationBranch?  @relation("ConversationActiveBranch", fields: [activeBranchId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@map("conversations")
 }
 
 model Message {
-  id             String       @id @default(uuid())
-  conversationId String       @map("conversation_id")
-  role           MessageRole
-  content        String
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  id              String      @id @default(uuid())
+  conversationId  String      @map("conversation_id")
+  branchId        String      @map("branch_id")
+  parentMessageId String?     @map("parent_message_id")
+  role            MessageRole
+  content         String
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation     Conversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  branch           ConversationBranch   @relation("MessageBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  parentMessage    Message?             @relation("MessageLineage", fields: [parentMessageId], references: [id], onDelete: Restrict)
+  childMessages    Message[]            @relation("MessageLineage")
+  forkedByBranches ConversationBranch[] @relation("BranchForkMessage")
+  headedByBranches ConversationBranch[] @relation("BranchHeadMessage")
 
   @@index([conversationId])
+  @@index([branchId])
+  @@index([parentMessageId])
   @@index([createdAt])
   @@map("messages")
+}
+
+model ConversationBranch {
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  parentBranchId String?  @map("parent_branch_id")
+  forkMessageId  String?  @map("fork_message_id")
+  headMessageId  String?  @map("head_message_id")
+  siblingOrder   Int      @default(0) @map("sibling_order")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  conversation  Conversation         @relation("ConversationBranches", fields: [conversationId], references: [id], onDelete: Cascade)
+  parentBranch  ConversationBranch?  @relation("BranchHierarchy", fields: [parentBranchId], references: [id], onDelete: Restrict)
+  childBranches ConversationBranch[] @relation("BranchHierarchy")
+  forkMessage   Message?             @relation("BranchForkMessage", fields: [forkMessageId], references: [id], onDelete: Restrict)
+  headMessage   Message?             @relation("BranchHeadMessage", fields: [headMessageId], references: [id], onDelete: Restrict)
+  messages      Message[]            @relation("MessageBranch")
+  activeFor     Conversation[]       @relation("ConversationActiveBranch")
+
+  @@index([conversationId, parentBranchId])
+  @@index([conversationId, forkMessageId, siblingOrder])
+  @@map("conversation_branches")
 }

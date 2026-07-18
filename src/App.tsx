@@ -34,6 +34,10 @@ import {
   useDeleteConversation,
   useCreateMessage,
   useDeleteMessage,
+  useConversationBranches,
+  useCreateBranch,
+  useSetActiveBranch,
+  useDeleteBranch,
 } from "@/hooks/use-chat";
 
 import { useAccent } from "./providers/accent-provider";
@@ -62,6 +66,9 @@ export default function App() {
   const deleteConversation = useDeleteConversation();
   const createMessage = useCreateMessage();
   const deleteMessage = useDeleteMessage();
+  const createBranch = useCreateBranch();
+  const setActiveBranch = useSetActiveBranch();
+  const deleteBranch = useDeleteBranch();
 
   // Selected state
   const [selectedConvId, setSelectedConvId] = useState<string | null>(() => {
@@ -79,6 +86,7 @@ export default function App() {
     }
     return null;
   });
+  const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
 
   // Save active conversation ID for "Remember Last Conversation" feature
   useEffect(() => {
@@ -96,7 +104,20 @@ export default function App() {
   }, [selectedConvId, settings.rememberLastConversation]);
   
   // Load messages for current conversation
-  const { data: messages, isLoading: isLoadingMessages } = useConversationMessages(selectedConvId);
+  const { data: branchState, isLoading: isLoadingBranches } = useConversationBranches(selectedConvId);
+  const resolvedBranchId = activeBranchId && branchState?.branches.some((branch) => branch.id === activeBranchId)
+    ? activeBranchId
+    : branchState?.activeBranchId ?? null;
+  const { data: messages, isLoading: isLoadingMessages } = useConversationMessages(selectedConvId, resolvedBranchId);
+  const activeBranch = branchState?.branches.find((branch) => branch.id === resolvedBranchId);
+
+  useEffect(() => {
+    setActiveBranchId(branchState?.activeBranchId ?? null);
+  }, [selectedConvId, branchState?.activeBranchId]);
+
+  useEffect(() => {
+    setActiveBranchId(null);
+  }, [selectedConvId]);
 
   // Layout & UI states
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -122,7 +143,7 @@ export default function App() {
   const [streamingCitations, setStreamingCitations] = useState<Array<{ title: string; url: string; snippet?: string }> | null>(null);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const shouldShowLandingHero = !selectedConvId || (
-    !isLoadingMessages &&
+    !isLoadingMessages && !isLoadingBranches &&
     !isStreaming &&
     (messages?.length ?? 0) === 0
   );
@@ -265,10 +286,12 @@ export default function App() {
       setUserHasScrolledUp(false);
       
       // 1. Save user's message
-      await createMessage.mutateAsync({
+      const userMessage = await createMessage.mutateAsync({
         conversationId: activeId,
         role: "USER",
-        content: cleanText
+        content: cleanText,
+        branchId: resolvedBranchId || undefined,
+        expectedHeadMessageId: activeBranch?.headMessageId ?? null,
       });
 
       // 2. Setup streaming states
@@ -289,7 +312,8 @@ export default function App() {
 
       const response = await fetch(`/api/conversations/${activeId}/stream`, {
         method: "POST",
-        headers
+        headers,
+        body: JSON.stringify({ branchId: resolvedBranchId || undefined, expectedHeadMessageId: userMessage.id }),
       });
 
       if (!response.ok) {
@@ -357,7 +381,8 @@ export default function App() {
       }
 
       // Invalidate query to pull the final completed message saved in DB
-      queryClient.invalidateQueries({ queryKey: chatKeys.messages(activeId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.messages(activeId, resolvedBranchId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.branches(activeId) });
     } catch (err: any) {
       console.error("Failed to append message or stream response", err);
       toast({
@@ -370,6 +395,39 @@ export default function App() {
       setStreamingText(null);
       setStreamingToolCall(null);
       setStreamingCitations(null);
+    }
+  };
+
+  const handleCreateBranch = async (messageId: string) => {
+    if (!selectedConvId || createBranch.isPending || isStreaming) return;
+    try {
+      const branch = await createBranch.mutateAsync({ conversationId: selectedConvId, forkMessageId: messageId });
+      setActiveBranchId(branch.id);
+      toast({ title: "Branch Created", description: "A new continuation is now active.", variant: "success" });
+    } catch (error) {
+      toast({ title: "Failed to Create Branch", description: error instanceof Error ? error.message : "Unable to create a branch.", variant: "error" });
+    }
+  };
+
+  const handleSelectBranch = async (branchId: string) => {
+    if (!selectedConvId || branchId === activeBranchId || setActiveBranch.isPending || isStreaming) return;
+    try {
+      await setActiveBranch.mutateAsync({ conversationId: selectedConvId, branchId });
+      setActiveBranchId(branchId);
+    } catch (error) {
+      toast({ title: "Failed to Switch Branch", description: error instanceof Error ? error.message : "Unable to switch branch.", variant: "error" });
+    }
+  };
+
+  const handleDeleteBranch = async () => {
+    if (!selectedConvId || !activeBranchId || deleteBranch.isPending || isStreaming) return;
+    if (!window.confirm("Delete this branch and its unique messages? Shared history will remain.")) return;
+    try {
+      const result = await deleteBranch.mutateAsync({ conversationId: selectedConvId, branchId: activeBranchId });
+      setActiveBranchId(result.activeBranchId);
+      toast({ title: "Branch Deleted", description: "Switched to a valid continuation.", variant: "success" });
+    } catch (error) {
+      toast({ title: "Failed to Delete Branch", description: error instanceof Error ? error.message : "Unable to delete this branch.", variant: "error" });
     }
   };
 
@@ -759,6 +817,31 @@ export default function App() {
                               message={msg}
                               onDelete={(id) => deleteMessage.mutate({ id, conversationId: selectedConvId })}
                               isDeleting={deleteMessage.isPending}
+                              onBranch={msg.role === "ASSISTANT" ? handleCreateBranch : undefined}
+                              isBranching={createBranch.isPending}
+                              branchNavigation={(() => {
+                                if (!activeBranch) return undefined;
+                                const allBranches = branchState?.branches || [];
+                                const isChildFork = activeBranch.forkMessageId === msg.id;
+                                const parentBranchId = isChildFork ? activeBranch.parentBranchId : activeBranch.id;
+                                const children = allBranches
+                                  .filter((branch) => branch.parentBranchId === parentBranchId && branch.forkMessageId === msg.id)
+                                  .sort((a, b) => a.siblingOrder - b.siblingOrder || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+                                if (!isChildFork && children.length === 0) return undefined;
+                                const parent = allBranches.find((branch) => branch.id === parentBranchId);
+                                const alternatives = parent ? [parent, ...children] : children;
+                                const index = alternatives.findIndex((branch) => branch.id === activeBranch.id);
+                                return {
+                                  current: index + 1,
+                                  total: alternatives.length,
+                                  previousBranchId: alternatives[index - 1]?.id,
+                                  nextBranchId: alternatives[index + 1]?.id,
+                                  onSelect: handleSelectBranch,
+                                  onDelete: handleDeleteBranch,
+                                  canDelete: Boolean(activeBranch.parentBranchId),
+                                  isSwitching: setActiveBranch.isPending || deleteBranch.isPending,
+                                };
+                              })()}
                             />
                           ))}
 
@@ -768,6 +851,8 @@ export default function App() {
                               message={{
                                 id: "streaming-temp-id",
                                 conversationId: selectedConvId || "",
+                                branchId: activeBranchId || "",
+                                parentMessageId: activeBranch?.headMessageId || null,
                                 role: "ASSISTANT",
                                 content: streamingText,
                                 createdAt: new Date(),

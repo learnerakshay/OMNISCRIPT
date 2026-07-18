@@ -15,6 +15,10 @@ import {
   serverCreateMessage,
   serverGetConversationMessages,
   serverDeleteMessage,
+  serverGetConversationBranches,
+  serverCreateBranch,
+  serverSetActiveBranch,
+  serverDeleteBranch,
   ValidationError
 } from "./src/actions/chat-actions";
 import { executeTool } from "./src/lib/tools/registry";
@@ -170,6 +174,11 @@ function handleServerError(error: any, res: Response) {
     return;
   }
 
+  if (errorName === "ConflictError") {
+    res.status(409).json({ error: errorMessage || "The branch state changed. Please refresh and try again." });
+    return;
+  }
+
   res.status(500).json({ error: "An internal server error occurred." });
 }
 
@@ -240,11 +249,29 @@ app.post("/api/conversations/:id/messages", requireAuth as any, async (req: Auth
 
 app.get("/api/conversations/:id/messages", requireAuth as any, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const result = await serverGetConversationMessages(req.auth!.userId, req.params.id);
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+    const result = await serverGetConversationMessages(req.auth!.userId, req.params.id, branchId);
     res.json(result);
   } catch (error) {
     handleServerError(error, res);
   }
+});
+
+// Branch Operations
+app.get("/api/conversations/:id/branches", requireAuth as any, async (req: AuthenticatedRequest, res: Response) => {
+  try { res.json(await serverGetConversationBranches(req.auth!.userId, req.params.id)); } catch (error) { handleServerError(error, res); }
+});
+
+app.post("/api/conversations/:id/branches", requireAuth as any, async (req: AuthenticatedRequest, res: Response) => {
+  try { res.status(201).json(await serverCreateBranch(req.auth!.userId, req.params.id, req.body.forkMessageId)); } catch (error) { handleServerError(error, res); }
+});
+
+app.patch("/api/conversations/:id/active-branch", requireAuth as any, async (req: AuthenticatedRequest, res: Response) => {
+  try { res.json(await serverSetActiveBranch(req.auth!.userId, req.params.id, req.body.branchId)); } catch (error) { handleServerError(error, res); }
+});
+
+app.delete("/api/conversations/:id/branches/:branchId", requireAuth as any, async (req: AuthenticatedRequest, res: Response) => {
+  try { res.json(await serverDeleteBranch(req.auth!.userId, req.params.id, req.params.branchId)); } catch (error) { handleServerError(error, res); }
 });
 
 app.delete("/api/messages/:id", requireAuth as any, async (req: AuthenticatedRequest, res: Response) => {
@@ -274,6 +301,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
 
     const conversationId = req.params.id;
     const userId = req.auth!.userId;
+    const requestedBranchId = typeof req.body?.branchId === "string" ? req.body.branchId : undefined;
 
     releaseStreamSlot = acquireStreamSlot(userId) ?? undefined;
     if (!releaseStreamSlot) {
@@ -302,7 +330,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
     }
 
     // Get messages
-    const messages = await serverGetConversationMessages(userId, conversationId);
+    const messages = await serverGetConversationMessages(userId, conversationId, requestedBranchId);
 
     // Format for Vercel AI SDK (USER -> user, ASSISTANT -> assistant)
     // Strip out JSON metadata from past assistant messages so the model gets clean context
@@ -470,7 +498,8 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         }
         await serverCreateMessage(userId, conversationId, {
           role: "ASSISTANT",
-          content: finalMessageContent
+          content: finalMessageContent,
+          branchId: requestedBranchId
         });
 
       } else if (toolName === "readUrl") {
@@ -571,7 +600,8 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         }
         await serverCreateMessage(userId, conversationId, {
           role: "ASSISTANT",
-          content: finalMessageContent
+          content: finalMessageContent,
+          branchId: requestedBranchId
         });
       }
     } else {
@@ -594,7 +624,8 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
       if (!abortController.signal.aborted && responseText.trim()) {
         await serverCreateMessage(userId, conversationId, {
           role: "ASSISTANT",
-          content: responseText
+          content: responseText,
+          branchId: requestedBranchId
         });
       }
     }

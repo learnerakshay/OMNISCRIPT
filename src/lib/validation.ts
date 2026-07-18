@@ -19,9 +19,23 @@ export const getConversationSchema = z.object({
 
 export const createMessageSchema = z.object({
   conversationId: z.string().uuid("Invalid conversation identifier format."),
+  branchId: z.string().uuid("Invalid branch identifier format.").optional(),
+  expectedHeadMessageId: z.string().uuid("Invalid branch head identifier format.").nullable().optional(),
   role: z.enum(["USER", "ASSISTANT", "SYSTEM"]),
   content: z.string().trim().min(1, "Message content cannot be empty.").max(10000, "Message content is too long."),
 });
+
+export const createBranchSchema = z.object({
+  conversationId: z.string().uuid("Invalid conversation identifier format."),
+  forkMessageId: z.string().uuid("Invalid message identifier format."),
+});
+
+export const selectBranchSchema = z.object({
+  conversationId: z.string().uuid("Invalid conversation identifier format."),
+  branchId: z.string().uuid("Invalid branch identifier format."),
+});
+
+export const deleteBranchSchema = selectBranchSchema;
 
 export const getConversationMessagesSchema = z.object({
   conversationId: z.string().uuid("Invalid conversation identifier format."),

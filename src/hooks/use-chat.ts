@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/clerk-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Conversation, Message, MessageRole } from "@prisma/client";
+import { Conversation, ConversationBranch, Message, MessageRole } from "@prisma/client";
 import { useToast } from "../providers/toast-provider";
 
 // Centralized and structured query keys to prevent hardcoded key collision issues
@@ -8,8 +8,15 @@ export const chatKeys = {
   all: ["chat"] as const,
   conversations: () => [...chatKeys.all, "conversations"] as const,
   conversation: (id: string) => [...chatKeys.all, "conversation", id] as const,
-  messages: (conversationId: string) => [...chatKeys.all, "messages", conversationId] as const,
+  messages: (conversationId: string, branchId?: string | null) => [...chatKeys.all, "messages", conversationId, branchId || "active"] as const,
+  branches: (conversationId: string) => [...chatKeys.all, "branches", conversationId] as const,
 };
+
+export interface BranchMetadata extends ConversationBranch { siblingCount: number; siblingIndex: number; }
+export interface ConversationBranches { activeBranchId: string; branches: BranchMetadata[]; }
+
+const isBranchId = (value: string | null | undefined): value is string =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 /**
  * Robust authenticated fetch utility.
@@ -74,12 +81,23 @@ export function useConversation(id: string | null) {
 /**
  * Hook to retrieve all messages in a specific conversation.
  */
-export function useConversationMessages(conversationId: string | null) {
+export function useConversationMessages(conversationId: string | null, branchId?: string | null) {
   const { getToken, userId } = useAuth();
 
   return useQuery<Message[], Error>({
-    queryKey: chatKeys.messages(conversationId || ""),
-    queryFn: () => authenticatedFetch<Message[]>(`/api/conversations/${conversationId}/messages`, {}, getToken),
+    queryKey: chatKeys.messages(conversationId || "", branchId),
+    queryFn: () => authenticatedFetch<Message[]>(`/api/conversations/${conversationId}/messages?branchId=${encodeURIComponent(branchId!)}`, {}, getToken),
+    // A branch-specific read must wait for metadata from the selected conversation.
+    // This prevents a previous conversation's branch ID being used during selection.
+    enabled: !!userId && !!conversationId && isBranchId(branchId),
+  });
+}
+
+export function useConversationBranches(conversationId: string | null) {
+  const { getToken, userId } = useAuth();
+  return useQuery<ConversationBranches, Error>({
+    queryKey: chatKeys.branches(conversationId || ""),
+    queryFn: () => authenticatedFetch<ConversationBranches>(`/api/conversations/${conversationId}/branches`, {}, getToken),
     enabled: !!userId && !!conversationId,
   });
 }
@@ -194,15 +212,18 @@ export function useCreateMessage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  return useMutation<Message, Error, { conversationId: string; role: MessageRole; content: string }>({
-    mutationFn: ({ conversationId, role, content }) => 
+  return useMutation<Message, Error, { conversationId: string; role: MessageRole; content: string; branchId?: string; expectedHeadMessageId?: string | null }>({
+    mutationFn: ({ conversationId, role, content, branchId, expectedHeadMessageId }) => 
       authenticatedFetch<Message>(`/api/conversations/${conversationId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ role, content }),
+        // Never submit a transient, empty, or stale client branch value. The server
+        // resolves the conversation's persisted active branch when this is omitted.
+        body: JSON.stringify({ role, content, branchId: isBranchId(branchId) ? branchId : undefined, expectedHeadMessageId }),
       }, getToken),
     onSuccess: (data) => {
       // Invalidate messages list for this specific conversation
-      queryClient.invalidateQueries({ queryKey: chatKeys.messages(data.conversationId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.messages(data.conversationId, data.branchId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.branches(data.conversationId) });
     },
     onError: (err) => {
       toast({
@@ -247,3 +268,39 @@ export function useDeleteMessage() {
   });
 }
 
+export function useCreateBranch() {
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation<BranchMetadata, Error, { conversationId: string; forkMessageId: string }>({
+    mutationFn: ({ conversationId, forkMessageId }) => authenticatedFetch<BranchMetadata>(`/api/conversations/${conversationId}/branches`, { method: "POST", body: JSON.stringify({ forkMessageId }) }, getToken),
+    onSuccess: (branch) => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.branches(branch.conversationId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.conversation(branch.conversationId) });
+    },
+  });
+}
+
+export function useSetActiveBranch() {
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation<Conversation, Error, { conversationId: string; branchId: string }>({
+    mutationFn: ({ conversationId, branchId }) => authenticatedFetch<Conversation>(`/api/conversations/${conversationId}/active-branch`, { method: "PATCH", body: JSON.stringify({ branchId }) }, getToken),
+    onSuccess: (conversation) => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.branches(conversation.id) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.conversation(conversation.id) });
+    },
+  });
+}
+
+export function useDeleteBranch() {
+  const { getToken } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation<{ deletedBranchId: string; activeBranchId: string | null }, Error, { conversationId: string; branchId: string }>({
+    mutationFn: ({ conversationId, branchId }) => authenticatedFetch<{ deletedBranchId: string; activeBranchId: string | null }>(`/api/conversations/${conversationId}/branches/${branchId}`, { method: "DELETE" }, getToken),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.branches(variables.conversationId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.messages(variables.conversationId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.conversation(variables.conversationId) });
+    },
+  });
+}

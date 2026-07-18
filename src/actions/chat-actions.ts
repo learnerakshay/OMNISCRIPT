@@ -7,7 +7,10 @@ import {
   deleteConversationSchema, 
   createMessageSchema, 
   getConversationMessagesSchema, 
-  deleteMessageSchema 
+  deleteMessageSchema,
+  createBranchSchema,
+  selectBranchSchema,
+  deleteBranchSchema
 } from "../lib/validation";
 
 // Custom error classes for clean business logic error handling
@@ -98,7 +101,7 @@ export async function serverDeleteConversation(userId: string, id: string): Prom
 export async function serverCreateMessage(
   userId: string, 
   conversationId: string, 
-  data: { role: MessageRole; content: string }
+  data: { role: MessageRole; content: string; branchId?: string; expectedHeadMessageId?: string | null }
 ): Promise<Message> {
   if (!userId) {
     throw new ValidationError("User must be authenticated.");
@@ -113,14 +116,16 @@ export async function serverCreateMessage(
     parsed.data.conversationId, 
     userId, 
     parsed.data.role, 
-    parsed.data.content
+    parsed.data.content,
+    parsed.data.branchId,
+    parsed.data.expectedHeadMessageId ?? undefined
   );
 }
 
 /**
  * Retrieves all messages in a conversation, validating user ownership of the conversation first.
  */
-export async function serverGetConversationMessages(userId: string, conversationId: string): Promise<Message[]> {
+export async function serverGetConversationMessages(userId: string, conversationId: string, branchId?: string): Promise<Message[]> {
   if (!userId) {
     throw new ValidationError("User must be authenticated.");
   }
@@ -130,7 +135,36 @@ export async function serverGetConversationMessages(userId: string, conversation
     throw new ValidationError(parsed.error.issues[0]?.message || "Invalid input.");
   }
 
-  return await chatRepo.getConversationMessages(parsed.data.conversationId, userId);
+  const result = await chatRepo.getBranchMessages(parsed.data.conversationId, userId, branchId);
+  return result.messages;
+}
+
+export async function serverGetConversationBranches(userId: string, conversationId: string) {
+  if (!userId) throw new ValidationError("User must be authenticated.");
+  const parsed = getConversationMessagesSchema.safeParse({ conversationId });
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message || "Invalid input.");
+  return chatRepo.getConversationBranches(parsed.data.conversationId, userId);
+}
+
+export async function serverCreateBranch(userId: string, conversationId: string, forkMessageId: string) {
+  if (!userId) throw new ValidationError("User must be authenticated.");
+  const parsed = createBranchSchema.safeParse({ conversationId, forkMessageId });
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message || "Invalid input.");
+  return chatRepo.createBranch(parsed.data.conversationId, userId, parsed.data.forkMessageId);
+}
+
+export async function serverSetActiveBranch(userId: string, conversationId: string, branchId: string) {
+  if (!userId) throw new ValidationError("User must be authenticated.");
+  const parsed = selectBranchSchema.safeParse({ conversationId, branchId });
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message || "Invalid input.");
+  return chatRepo.setActiveBranch(parsed.data.conversationId, userId, parsed.data.branchId);
+}
+
+export async function serverDeleteBranch(userId: string, conversationId: string, branchId: string) {
+  if (!userId) throw new ValidationError("User must be authenticated.");
+  const parsed = deleteBranchSchema.safeParse({ conversationId, branchId });
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message || "Invalid input.");
+  return chatRepo.deleteBranch(parsed.data.conversationId, userId, parsed.data.branchId);
 }
 
 /**

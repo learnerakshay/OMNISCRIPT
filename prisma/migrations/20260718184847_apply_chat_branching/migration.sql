@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "conversation_branches_conversation_id_fork_message_id_sibling_o" RENAME TO "conversation_branches_conversation_id_fork_message_id_sibli_idx";
