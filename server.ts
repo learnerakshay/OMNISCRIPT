@@ -40,10 +40,26 @@ interface AuthenticatedRequest extends Request {
 }
 
 const app = express();
-const PORT = 3000;
+const configuredPort = Number.parseInt(process.env.PORT || "", 10);
+const PORT = Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
+const allowedOrigins = (process.env.APP_URL || "").split(",").map((origin) => origin.trim()).filter(Boolean);
 
 // Centralized JSON body parser
 app.use(express.json());
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+  }
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
 
 const STREAM_WINDOW_MS = 60_000;
 const MAX_STREAM_REQUESTS_PER_WINDOW = 12;
@@ -406,7 +422,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
       const normalizedCall = normalizeToolCall(toolCalls[0]);
 
       if (normalizedCall.success === false) {
-        console.error(JSON.stringify({ event: "tool_call_rejected", rawToolCallKeys: normalizedCall.rawKeys, requestedToolName: normalizedCall.toolName || "missing", registeredToolNames: getRegisteredToolNames(), rawArgumentsType: typeof normalizedCall.rawArguments, rawArguments: normalizedCall.rawArguments, argumentFailure: normalizedCall.error }));
+        console.error(JSON.stringify({ event: "tool_call_rejected", rawToolCallKeys: normalizedCall.rawKeys, requestedToolName: normalizedCall.toolName || "missing", registeredToolNames: getRegisteredToolNames(), rawArgumentsType: typeof normalizedCall.rawArguments, argumentFailure: normalizedCall.error }));
         writeSse(res, { error: "The AI returned an incomplete tool request. Please try again." });
         endSse(res);
         return;
@@ -423,8 +439,6 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
           requestedToolName: toolName,
           registeredToolNames: getRegisteredToolNames(),
           rawArgumentsType: typeof rawArguments,
-          rawArguments,
-          normalizedParsedArguments: undefined,
           argumentFailure: parsedToolArgs.error,
         }));
         writeSse(res, { type: "stream_error", error: "The AI requested an unsupported or invalid tool operation. Please try again." });

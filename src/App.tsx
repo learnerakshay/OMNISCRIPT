@@ -23,7 +23,7 @@ import {
   useAuth
 } from "@clerk/clerk-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { chatKeys } from "./hooks/use-chat";
+import { apiUrl, chatKeys } from "./hooks/use-chat";
 import { useToast } from "./providers/toast-provider";
 
 import {
@@ -360,7 +360,7 @@ export default function App() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const response = await fetch(`/api/conversations/${activeId}/stream`, {
+      const response = await fetch(apiUrl(`/api/conversations/${activeId}/stream`), {
         method: "POST",
         headers,
         body: JSON.stringify({ branchId: streamBranchId, expectedHeadMessageId: userMessage.id }),

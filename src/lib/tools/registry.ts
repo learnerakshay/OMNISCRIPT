@@ -149,15 +149,6 @@ export function parseToolArguments(name: string, rawArguments: unknown): { succe
     }
   }
   const result = registry[name].parameters.safeParse(parsedArguments);
-  if (name === "calculator") {
-    console.info(JSON.stringify({
-      event: "calculator_input_validation",
-      rawInput: rawArguments,
-      parsedInput: parsedArguments,
-      valid: result.success,
-      validationError: result.success ? undefined : result.error.issues[0]?.message,
-    }));
-  }
   return result.success
     ? { success: true, data: result.data }
     : { success: false, error: result.error.issues[0]?.message || "Tool arguments are invalid." };

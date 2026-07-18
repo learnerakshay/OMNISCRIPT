@@ -12,6 +12,9 @@ export const chatKeys = {
   branches: (conversationId: string) => [...chatKeys.all, "branches", conversationId] as const,
 };
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "") || "";
+export const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
+
 export interface BranchMetadata extends ConversationBranch { siblingCount: number; siblingIndex: number; }
 export interface ConversationBranches { activeBranchId: string; branches: BranchMetadata[]; }
 export interface DeleteMessageResult {
@@ -44,7 +47,7 @@ async function authenticatedFetch<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...options,
     headers,
   });
