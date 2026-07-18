@@ -21,7 +21,7 @@ import {
   serverDeleteBranch,
   ValidationError
 } from "./src/actions/chat-actions";
-import { calculatorInputSchema, executeTool, getRegisteredToolNames, normalizeToolCall, parseToolArguments, ToolExecutionResult } from "./src/lib/tools/registry";
+import { calculatorInputSchema, executeTool, getRegisteredToolNames, normalizeToolCall, parseToolArguments, ToolExecutionResult, webSearchInputSchema } from "./src/lib/tools/registry";
 
 // Vite loads .env.local for the browser, but the Express process is started by tsx.
 // Load local server configuration without overriding platform-injected environment variables.
@@ -378,7 +378,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
     const initialResponse = await generateText({
       model: getOpenAIModel(),
       messages: coreMessages,
-      system: "You are OMNISCRIPT. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {\"expression\":\"24 * 18\"}. Use currentDateTime only for current date/time requests. Answer normally otherwise.",
+      system: "You are OMNISCRIPT. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {\"expression\":\"24 * 18\"}. Use currentDateTime only for current date/time requests. Use webSearch only when current, time-sensitive, or externally verifiable web information is needed; its query field must be specific and non-empty. Answer normally otherwise.",
       tools: {
         calculator: {
           ...calculatorToolDefinition,
@@ -386,6 +386,10 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         currentDateTime: {
           description: "Get the current date and time for an optional IANA timezone.",
           parameters: readUrlParameters,
+        } as any,
+        webSearch: {
+          description: "Search the live web for current information. Required input: { query: string }, containing a specific search query.",
+          inputSchema: webSearchInputSchema,
         } as any,
       } as any,
       abortSignal: abortController.signal,
@@ -428,7 +432,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         return;
       }
 
-      const toolArgs = parsedToolArgs.data as { expression?: string; timezone?: string };
+      const toolArgs = parsedToolArgs.data as { expression?: string; timezone?: string; query?: string };
 
       if (toolName === "calculator") {
         const query = toolArgs.expression || "";
@@ -584,6 +588,62 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
           role: "ASSISTANT",
           content: finalMessageContent,
           branchId: requestedBranchId
+        });
+      } else if (toolName === "webSearch") {
+        const query = toolArgs.query || "";
+        writeSse(res, { type: "status", name: "webSearch", status: "searching", query });
+
+        let toolResult: ToolExecutionResult;
+        try {
+          toolResult = await executeTool(toolName, toolArgs, abortController.signal);
+        } catch (err: any) {
+          toolResult = { success: false, error: err instanceof Error ? err.message : "Web search failed." };
+        }
+
+        writeSse(res, { type: "status", name: "webSearch", status: "processing", query });
+        const citations = toolResult.success && Array.isArray(toolResult.result.results)
+          ? toolResult.result.results
+            .filter((result): result is { title: string; url: string; snippet?: string } => typeof result === "object" && result !== null && typeof (result as Record<string, unknown>).title === "string" && typeof (result as Record<string, unknown>).url === "string")
+            .map((result) => ({ title: result.title, url: result.url, snippet: result.snippet }))
+          : [];
+        writeSse(res, { type: "citations", citations });
+
+        const updatedMessages = buildToolContinuationMessages(coreMessages, toolCallId, toolName, toolArgs, toolResult);
+        const { textStream } = await streamText({
+          model: getOpenAIModel(),
+          messages: updatedMessages,
+          system: "You are OMNISCRIPT. Answer the user's request using the provided web search results. Be precise about time-sensitive facts, distinguish uncertainty when evidence is incomplete, and never claim information not supported by the results. Do not output raw JSON or raw URLs.",
+          abortSignal: abortController.signal,
+        });
+
+        let fullResponseText = "";
+        for await (const text of textStream) {
+          if (text) {
+            fullResponseText += text;
+            writeSse(res, { type: "text", text });
+          }
+        }
+
+        const toolError = "error" in toolResult ? toolResult.error : undefined;
+        const finalMessageContent = JSON.stringify({
+          omniscript: true,
+          text: fullResponseText,
+          toolCall: {
+            name: "webSearch",
+            query,
+            results: citations,
+            status: toolResult.success ? "completed" : "failed",
+            error: toolError,
+          },
+          citations,
+        });
+        if (abortController.signal.aborted) {
+          throw new Error("AI stream was cancelled before the response could be saved.");
+        }
+        await serverCreateMessage(userId, conversationId, {
+          role: "ASSISTANT",
+          content: finalMessageContent,
+          branchId: requestedBranchId,
         });
       }
     } else {

@@ -65,11 +65,48 @@ export default function App() {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { classes } = useAccent();
+  const { classes, accentColor } = useAccent();
   const { settings } = useUserSettings();
   const { playSound } = useSounds();
   const [isHeaderRippling, setIsHeaderRippling] = useState(false);
+  const loginGlowRef = useRef<HTMLDivElement>(null);
   const isUsingFallbackKey = !import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  useEffect(() => {
+    if (user || typeof window === "undefined") return;
+    const media = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (!media.matches || reducedMotion.matches) return;
+
+    let animationFrame = 0;
+    let pointerX = window.innerWidth / 2;
+    let pointerY = window.innerHeight / 2;
+    const updateGlow = () => {
+      animationFrame = 0;
+      if (loginGlowRef.current) {
+        loginGlowRef.current.style.transform = `translate3d(${pointerX - 160}px, ${pointerY - 160}px, 0)`;
+      }
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      if (!animationFrame) animationFrame = window.requestAnimationFrame(updateGlow);
+    };
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+    };
+  }, [user]);
+
+  const loginGlowColor: Record<typeof accentColor, string> = {
+    blue: "#2563eb",
+    purple: "#8b5cf6",
+    emerald: "#39FF14",
+    orange: "#f97316",
+    rose: "#f43f5e",
+    cyan: "#06b6d4",
+  };
 
   // React Query Hook integrations
   const { data: conversations, isLoading: isLoadingConversations, refetch: refetchConversations } = useConversations();
@@ -302,6 +339,10 @@ export default function App() {
         branchId: resolvedBranchId || undefined,
         expectedHeadMessageId: activeBranch?.headMessageId ?? null,
       });
+      // The create-message response is the authoritative branch for a newly
+      // created conversation; state/query metadata may not have resolved yet.
+      const streamBranchId = userMessage.branchId;
+      setActiveBranchId(streamBranchId);
 
       // 2. Setup streaming states
       playSound("activation");
@@ -322,7 +363,7 @@ export default function App() {
       const response = await fetch(`/api/conversations/${activeId}/stream`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ branchId: resolvedBranchId || undefined, expectedHeadMessageId: userMessage.id }),
+        body: JSON.stringify({ branchId: streamBranchId, expectedHeadMessageId: userMessage.id }),
       });
 
       if (!response.ok) {
@@ -390,8 +431,8 @@ export default function App() {
       }
 
       // Invalidate query to pull the final completed message saved in DB
-      queryClient.invalidateQueries({ queryKey: chatKeys.messages(activeId, resolvedBranchId) });
-      queryClient.invalidateQueries({ queryKey: chatKeys.branches(activeId) });
+      await queryClient.invalidateQueries({ queryKey: chatKeys.messages(activeId, streamBranchId) });
+      await queryClient.invalidateQueries({ queryKey: chatKeys.branches(activeId) });
     } catch (err: any) {
       console.error("Failed to append message or stream response", err);
       toast({
@@ -487,6 +528,12 @@ export default function App() {
       {/* SIGNED OUT AUTH SPLASH SCREEN */}
       <SignedOut>
         <div className="flex-1 flex flex-col justify-between items-center p-6 bg-linear-to-b from-background via-muted/10 to-muted/20 relative min-h-screen">
+          <div
+            ref={loginGlowRef}
+            aria-hidden="true"
+            className="absolute left-0 top-0 z-0 h-80 w-80 rounded-full blur-3xl opacity-25 pointer-events-none will-change-transform"
+            style={{ background: `radial-gradient(circle, ${loginGlowColor[accentColor]} 0%, transparent 68%)` }}
+          />
           {/* Subtle background nodes */}
           <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-zinc-400/5 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-zinc-300/5 rounded-full blur-3xl pointer-events-none"></div>
@@ -771,10 +818,10 @@ export default function App() {
                               setComposerText(item.prompt);
                               if (textareaRef.current) textareaRef.current.focus();
                             }}
-                            className={`p-4 rounded-xl border border-border bg-card text-left hover:border-foreground/15 hover:${classes.accentBg} hover:shadow-xs transition-all cursor-pointer group space-y-1.5 focus:outline-hidden focus:ring-1 focus:ring-ring`}
+                            className={`p-4 rounded-xl border ${classes.border} bg-card text-left hover:-translate-y-0.5 hover:scale-[1.01] transition-[transform,border-color] duration-200 ease-out cursor-pointer group space-y-1.5 focus:outline-hidden focus:ring-1 focus:ring-ring`}
                           >
                             <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                              <Compass className={`w-3.5 h-3.5 text-muted-foreground group-hover:${classes.text}`} />
+                              <Compass className="w-3.5 h-3.5 text-muted-foreground" />
                               {item.title}
                             </div>
                             <p className="text-[11px] text-muted-foreground line-clamp-2 leading-normal">
@@ -812,7 +859,7 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-                      ) : !messages || messages.length === 0 ? (
+                      ) : (!messages || messages.length === 0) && !isStreaming ? (
                         <div className="flex-1 flex flex-col items-center justify-center py-20 text-center space-y-3">
                            <MessageSquare className="w-8 h-8 text-muted-foreground animate-bounce" />
                            <p className="text-xs font-semibold text-muted-foreground">Active session initialized.</p>
@@ -820,12 +867,28 @@ export default function App() {
                         </div>
                       ) : (
                         <div className="flex-1 flex flex-col gap-6 pb-[180px] sm:pb-[200px] md:pb-[220px]">
-                          {messages.map((msg) => (
+                          {(messages || []).map((msg) => (
                             <MessageBubble
                               key={msg.id}
                               message={msg}
-                              onDelete={(id) => deleteMessage.mutate({ id, conversationId: selectedConvId })}
-                              isDeleting={deleteMessage.isPending}
+                              onDelete={(id) => {
+                                if (!selectedConvId || isStreaming) return;
+                                deleteMessage.mutate(
+                                  { id, conversationId: selectedConvId },
+                                  {
+                                    onSuccess: (result) => {
+                                      if (selectedConvId !== result.conversationId) return;
+                                      if (result.conversationDeleted || result.conversationEmpty) {
+                                        setActiveBranchId(null);
+                                        setSelectedConvId(null);
+                                        return;
+                                      }
+                                      setActiveBranchId(result.nextActiveBranchId);
+                                    },
+                                  },
+                                );
+                              }}
+                              isDeleting={deleteMessage.isPending || isStreaming}
                               onBranch={msg.role === "ASSISTANT" ? handleCreateBranch : undefined}
                               isBranching={createBranch.isPending}
                               branchNavigation={(() => {
@@ -958,25 +1021,9 @@ export default function App() {
 
                 </div>
 
-                {/* Professional keyboard shortcuts quick bar */}
-                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground/85 mt-3 select-none font-sans">
-                  <div className="flex items-center gap-1">
-                    <kbd className="font-mono bg-muted border border-border px-1.5 py-0.5 rounded text-[9px] shadow-2xs">Enter</kbd>
-                    <span>Send</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <kbd className="font-mono bg-muted border border-border px-1.5 py-0.5 rounded text-[9px] shadow-2xs">Shift + Enter</kbd>
-                    <span>New line</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <kbd className="font-mono bg-muted border border-border px-1.5 py-0.5 rounded text-[9px] shadow-2xs">⌘K</kbd>
-                    <span>Focus</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <kbd className="font-mono bg-muted border border-border px-1.5 py-0.5 rounded text-[9px] shadow-2xs">⌘B</kbd>
-                    <span>Toggle Sidebar</span>
-                  </div>
-                </div>
+                <p className="mt-2 text-center text-[10px] text-muted-foreground/70">
+                  OMNISCRIPT can make mistakes. Verify important information.
+                </p>
               </div>
             </div>
 

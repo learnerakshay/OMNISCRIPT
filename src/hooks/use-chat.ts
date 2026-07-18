@@ -14,6 +14,14 @@ export const chatKeys = {
 
 export interface BranchMetadata extends ConversationBranch { siblingCount: number; siblingIndex: number; }
 export interface ConversationBranches { activeBranchId: string; branches: BranchMetadata[]; }
+export interface DeleteMessageResult {
+  conversationId: string;
+  deletedMessageIds: string[];
+  deletedBranchIds: string[];
+  conversationDeleted: boolean;
+  conversationEmpty: boolean;
+  nextActiveBranchId: string | null;
+}
 
 const isBranchId = (value: string | null | undefined): value is string =>
   typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -244,17 +252,27 @@ export function useDeleteMessage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  return useMutation<Message, Error, { id: string; conversationId: string }>({
+  return useMutation<DeleteMessageResult, Error, { id: string; conversationId: string }>({
     mutationFn: ({ id }) => 
-      authenticatedFetch<Message>(`/api/messages/${id}`, {
+      authenticatedFetch<DeleteMessageResult>(`/api/messages/${id}`, {
         method: "DELETE",
       }, getToken),
     onSuccess: (data) => {
-      // Refresh messages list for the conversation this message belonged to
-      queryClient.invalidateQueries({ queryKey: chatKeys.messages(data.conversationId) });
+      if (data.conversationDeleted) {
+        queryClient.removeQueries({ queryKey: chatKeys.messages(data.conversationId) });
+        queryClient.removeQueries({ queryKey: chatKeys.branches(data.conversationId) });
+        queryClient.removeQueries({ queryKey: chatKeys.conversation(data.conversationId) });
+      } else {
+        queryClient.invalidateQueries({ queryKey: chatKeys.messages(data.conversationId) });
+        queryClient.invalidateQueries({ queryKey: chatKeys.branches(data.conversationId) });
+        queryClient.invalidateQueries({ queryKey: chatKeys.conversation(data.conversationId) });
+      }
+      queryClient.invalidateQueries({ queryKey: chatKeys.conversations() });
       toast({
-        title: "Message Deleted",
-        description: "Message was successfully removed from the conversation.",
+        title: data.deletedBranchIds.length > 0 ? "Turn and Branches Deleted" : "Message Deleted",
+        description: data.deletedBranchIds.length > 0
+          ? "The selected turn and its dependent branches were removed."
+          : "The selected message was successfully removed from the conversation.",
         variant: "success",
       });
     },

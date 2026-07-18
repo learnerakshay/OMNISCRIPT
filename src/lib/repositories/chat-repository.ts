@@ -11,6 +11,15 @@ export interface BranchMetadata extends ConversationBranch {
   siblingIndex: number;
 }
 
+export interface DeleteMessageResult {
+  conversationId: string;
+  deletedMessageIds: string[];
+  deletedBranchIds: string[];
+  conversationDeleted: boolean;
+  conversationEmpty: boolean;
+  nextActiveBranchId: string | null;
+}
+
 async function validateOwnership(id: string, userId: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<Conversation> {
   const conversation = await client.conversation.findUnique({ where: { id } });
   if (!conversation) throw new NotFoundError("Conversation not found.");
@@ -170,15 +179,138 @@ export async function deleteBranch(conversationId: string, userId: string, branc
   });
 }
 
-export async function deleteMessage(messageId: string, userId: string): Promise<Message> {
-  const message = await prisma.message.findUnique({ where: { id: messageId } });
-  if (!message) throw new NotFoundError("Message not found.");
-  await validateOwnership(message.conversationId, userId);
-  const referenced = await prisma.$transaction(async (tx) => {
-    const childCount = await tx.message.count({ where: { parentMessageId: messageId } });
-    const branchCount = await tx.conversationBranch.count({ where: { OR: [{ forkMessageId: messageId }, { headMessageId: messageId }] } });
-    if (childCount || branchCount) throw new ConflictError("Messages used by a branch cannot be deleted.");
-    return tx.message.delete({ where: { id: messageId } });
+export async function deleteMessage(messageId: string, userId: string): Promise<DeleteMessageResult> {
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.message.findUnique({ where: { id: messageId } });
+    if (!target) throw new NotFoundError("Message not found.");
+    const conversation = await validateOwnership(target.conversationId, userId, tx);
+
+    // A branch is a continuation of the message lineage, so deleting a message
+    // removes only its descendants and branches that depend on those descendants.
+    // This leaves earlier history and unrelated sibling continuations intact.
+    const descendants = await tx.$queryRaw<Array<{ id: string; parentMessageId: string | null; depth: number }>>(Prisma.sql`
+      WITH RECURSIVE descendants AS (
+        SELECT m.id, m.parent_message_id, 0 AS depth, ARRAY[m.id] AS visited
+        FROM "messages" m
+        WHERE m.id = ${messageId} AND m.conversation_id = ${conversation.id}
+        UNION ALL
+        SELECT child.id, child.parent_message_id, descendants.depth + 1, descendants.visited || child.id
+        FROM "messages" child
+        JOIN descendants ON child.parent_message_id = descendants.id
+        WHERE child.conversation_id = ${conversation.id}
+          AND NOT child.id = ANY(descendants.visited)
+          AND descendants.depth < 10000
+      )
+      SELECT id, parent_message_id AS "parentMessageId", depth
+      FROM descendants
+    `);
+    const deletedMessageIds = descendants.map((message) => message.id);
+    const deletedMessageIdSet = new Set(deletedMessageIds);
+
+    const allBranches = await tx.conversationBranch.findMany({ where: { conversationId: conversation.id } });
+    const branchesToDelete = new Set(
+      allBranches
+        .filter((branch) => branch.parentBranchId !== null && branch.forkMessageId !== null && deletedMessageIdSet.has(branch.forkMessageId))
+        .map((branch) => branch.id),
+    );
+
+    // A branch with retained messages before the deleted turn stays valid; only
+    // a branch whose fork point was removed (and its descendants) is removed.
+    let foundChild = true;
+    while (foundChild) {
+      foundChild = false;
+      for (const branch of allBranches) {
+        if (branch.parentBranchId && branchesToDelete.has(branch.parentBranchId) && !branchesToDelete.has(branch.id)) {
+          branchesToDelete.add(branch.id);
+          foundChild = true;
+        }
+      }
+    }
+
+    const deletedBranchIds = [...branchesToDelete];
+    let nextActiveBranchId = conversation.activeBranchId;
+    if (nextActiveBranchId && branchesToDelete.has(nextActiveBranchId)) {
+      let replacement = allBranches.find((branch) => branch.id === nextActiveBranchId)?.parentBranchId ?? null;
+      while (replacement && branchesToDelete.has(replacement)) {
+        replacement = allBranches.find((branch) => branch.id === replacement)?.parentBranchId ?? null;
+      }
+      nextActiveBranchId = replacement ?? allBranches.find((branch) => !branch.parentBranchId)?.id ?? null;
+    }
+
+    const deletedMessageParents = new Map(descendants.map((message) => [message.id, message.parentMessageId]));
+    const nearestRetainedHead = (messageId: string): string | null => {
+      let currentId: string | null = messageId;
+      while (currentId && deletedMessageIdSet.has(currentId)) {
+        currentId = deletedMessageParents.get(currentId) ?? null;
+      }
+      return currentId;
+    };
+
+    // Keep surviving branches readable by moving any deleted head back to the
+    // closest retained message in the same shared lineage.
+    for (const branch of allBranches) {
+      if (!branchesToDelete.has(branch.id) && branch.headMessageId && deletedMessageIdSet.has(branch.headMessageId)) {
+        await tx.conversationBranch.update({
+          where: { id: branch.id },
+          data: { headMessageId: nearestRetainedHead(branch.headMessageId) },
+        });
+      }
+    }
+
+    if (conversation.activeBranchId !== nextActiveBranchId) {
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { activeBranchId: nextActiveBranchId },
+      });
+    }
+
+    // Remove branch-to-message references before deleting descendant messages.
+    // These branches are deleted later, after their owned message rows are gone.
+    for (const branchId of deletedBranchIds) {
+      await tx.conversationBranch.update({
+        where: { id: branchId },
+        data: { forkMessageId: null, headMessageId: null },
+      });
+    }
+
+    // Delete message descendants from leaves up, then delete branches from
+    // leaves to root so hierarchy and message foreign keys remain valid.
+    const deleteBranchDepth = (branchId: string): number => {
+      let depth = 0;
+      let current = allBranches.find((branch) => branch.id === branchId);
+      while (current?.parentBranchId) {
+        depth += 1;
+        current = allBranches.find((branch) => branch.id === current?.parentBranchId);
+      }
+      return depth;
+    };
+    for (const message of [...descendants].sort((a, b) => b.depth - a.depth)) {
+      await tx.message.delete({ where: { id: message.id } });
+    }
+    for (const branchId of deletedBranchIds.sort((a, b) => deleteBranchDepth(b) - deleteBranchDepth(a))) {
+      await tx.conversationBranch.delete({ where: { id: branchId } });
+    }
+
+    const remainingMessageCount = await tx.message.count({ where: { conversationId: conversation.id } });
+    if (remainingMessageCount === 0) {
+      await tx.conversation.delete({ where: { id: conversation.id } });
+      return {
+        conversationId: conversation.id,
+        deletedMessageIds,
+        deletedBranchIds,
+        conversationDeleted: true,
+        conversationEmpty: true,
+        nextActiveBranchId: null,
+      };
+    }
+
+    return {
+      conversationId: conversation.id,
+      deletedMessageIds,
+      deletedBranchIds,
+      conversationDeleted: false,
+      conversationEmpty: false,
+      nextActiveBranchId,
+    };
   });
-  return referenced;
 }

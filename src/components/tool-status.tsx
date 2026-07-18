@@ -35,8 +35,12 @@ export function ToolStatusIndicator({ name, status, query, url, citations = [], 
 
   const isCalculator = name === "calculator";
   const isDateTime = name === "currentDateTime";
-  const label = isCalculator ? "Calculator" : isDateTime ? "Current date & time" : "Tool";
-  const displayTarget = isCalculator ? formatCalculatorExpression(query || "") : url;
+  const isWebSearch = name === "webSearch";
+  const label = isCalculator ? "Calculator" : isDateTime ? "Current date & time" : isWebSearch ? "Web Search" : "Tool";
+  const displayTarget = isCalculator ? formatCalculatorExpression(query || "") : isWebSearch ? query : url;
+  const getDomain = (value: string) => {
+    try { return new URL(value).hostname.replace(/^www\./, ""); } catch { return value; }
+  };
 
   // Render active streaming states (not completed yet)
   if (status === "searching" || status === "reading_url" || status === "processing") {
@@ -47,7 +51,7 @@ export function ToolStatusIndicator({ name, status, query, url, citations = [], 
         </div>
         <div className="space-y-0.5">
           <p className="font-medium text-foreground flex items-center gap-1.5">
-            {isCalculator ? <Search className="w-3.5 h-3.5 text-zinc-500" /> : <LinkIcon className="w-3.5 h-3.5 text-zinc-500" />}
+            {isCalculator || isWebSearch ? <Search className="w-3.5 h-3.5 text-zinc-500" /> : <LinkIcon className="w-3.5 h-3.5 text-zinc-500" />}
             {status === "searching" && `Running ${label.toLowerCase()}...`}
             {status === "reading_url" && `Preparing ${label.toLowerCase()}...`}
             {status === "processing" && "Preparing response..."}
@@ -90,6 +94,36 @@ export function ToolStatusIndicator({ name, status, query, url, citations = [], 
           <p className="mt-1 pl-5.5 font-mono text-[10.5px] text-muted-foreground break-words">
             {displayTarget}
           </p>
+        )}
+      </div>
+    );
+  }
+
+  if (isWebSearch) {
+    return (
+      <div className="max-w-md rounded-xl border border-border/60 bg-muted/15 px-3 py-2.5 text-xs select-none">
+        <div className="flex items-center gap-2 text-foreground/90">
+          <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+          <span className="font-medium">Web Search</span>
+        </div>
+        {query && <p className="mt-1 pl-5.5 text-[10.5px] text-muted-foreground break-words">{query}</p>}
+        {citations.length > 0 && (
+          <div className="mt-2 space-y-1.5 border-t border-border/40 pt-2">
+            {citations.slice(0, 5).map((citation, index) => (
+              <a
+                key={`${citation.url}-${index}`}
+                href={citation.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-foreground/90 transition-colors hover:bg-muted/40 hover:text-foreground"
+              >
+                <Globe className="h-3 w-3 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1 truncate text-[10.5px] font-medium">{citation.title}</span>
+                <span className="max-w-24 shrink-0 truncate font-mono text-[9px] text-muted-foreground">{getDomain(citation.url)}</span>
+                <ExternalLink className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+              </a>
+            ))}
+          </div>
         )}
       </div>
     );

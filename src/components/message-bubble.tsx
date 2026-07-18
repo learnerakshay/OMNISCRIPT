@@ -81,7 +81,7 @@ export function MessageBubble({
 
   const activeToolCall = isStreaming ? streamingToolCall : (isOmniscriptJSON ? parsedData.toolCall : null);
   const activeCitations = isStreaming ? streamingCitations : (isOmniscriptJSON ? parsedData.citations : null);
-  const isInternalTool = activeToolCall?.name === "calculator" || activeToolCall?.name === "currentDateTime";
+  const isInternalTool = activeToolCall?.name === "calculator" || activeToolCall?.name === "currentDateTime" || activeToolCall?.name === "webSearch";
   const calculatorExpression = activeToolCall?.name === "calculator" && typeof activeToolCall.query === "string"
     ? activeToolCall.query
     : null;

@@ -170,7 +170,7 @@ export async function serverDeleteBranch(userId: string, conversationId: string,
 /**
  * Deletes a message from a conversation, validating ownership first.
  */
-export async function serverDeleteMessage(userId: string, id: string): Promise<Message> {
+export async function serverDeleteMessage(userId: string, id: string): Promise<chatRepo.DeleteMessageResult> {
   if (!userId) {
     throw new ValidationError("User must be authenticated.");
   }
