@@ -5,6 +5,11 @@ import { PrismaClient } from "@prisma/client";
  * environment variables, supporting both Unix domain sockets (Cloud SQL proxy) and TCP hosts.
  */
 function getDatabaseUrl(): string {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl) {
+    return databaseUrl;
+  }
+
   const host = process.env.SQL_HOST;
   const user = process.env.SQL_USER;
   const password = process.env.SQL_PASSWORD;

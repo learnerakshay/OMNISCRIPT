@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
+import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { verifyToken } from "@clerk/backend";
 import { generateText, streamText } from "ai";
@@ -17,6 +18,15 @@ import {
   ValidationError
 } from "./src/actions/chat-actions";
 import { executeTool } from "./src/lib/tools/registry";
+
+// Vite loads .env.local for the browser, but the Express process is started by tsx.
+// Load local server configuration without overriding platform-injected environment variables.
+dotenv.config({
+  path: [
+    path.resolve(process.cwd(), ".env.local"),
+    path.resolve(process.cwd(), ".env"),
+  ],
+});
 
 // Extend Request interface to include Clerk authenticated user info
 interface AuthenticatedRequest extends Request {
