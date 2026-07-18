@@ -1,20 +1,34 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# OMNISCRIPT
 
-# Run and deploy your AI Studio app
+An AI-powered engineering assistant built with modern full-stack technologies.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/f75b2e8f-c163-42a0-adb5-8c2dc9a9d38a
+- AI Chat
+- Streaming Responses
+- Tool Calling
+- Chat Branching
+- Clerk Authentication
+- Prisma
+- PostgreSQL
 
-## Run Locally
+## Tech Stack
 
-**Prerequisites:**  Node.js
+- React
+- TypeScript
+- Vite
+- Express
+- Prisma
+- Clerk
+- OpenAI SDK
 
+## Installation
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev
+```
+
+## Status
+
+🚧 Under Active Development
