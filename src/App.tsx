@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { 
   Sparkles, 
   Menu, 
@@ -62,6 +62,7 @@ function createConciseTitle(prompt: string): string {
 
 export default function App() {
   const { user, isLoaded } = useUser();
+  const shouldReduceMotion = useReducedMotion();
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -90,7 +91,8 @@ export default function App() {
     const updateGlow = () => {
       animationFrame = 0;
       if (loginGlowRef.current) {
-        loginGlowRef.current.style.transform = `translate3d(${pointerX - 160}px, ${pointerY - 160}px, 0)`;
+        loginGlowRef.current.style.setProperty("--login-glow-x", `${pointerX - 160}px`);
+        loginGlowRef.current.style.setProperty("--login-glow-y", `${pointerY - 160}px`);
       }
     };
     const handlePointerMove = (event: PointerEvent) => {
@@ -122,8 +124,9 @@ export default function App() {
         const glow = loginGlowRef.current;
         if (!glow) return;
         const { x, y } = touchGlowPositionRef.current;
-        glow.style.transform = `translate3d(${x - 160}px, ${y - 160}px, 0)`;
-        glow.style.opacity = "0.295";
+        glow.style.setProperty("--login-glow-x", `${x - 160}px`);
+        glow.style.setProperty("--login-glow-y", `${y - 160}px`);
+        glow.style.opacity = "0.3";
       });
     }
   };
@@ -150,6 +153,15 @@ export default function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    activeTouchPointerIdRef.current = null;
+    if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
+    touchGlowFadeTimeoutRef.current = setTimeout(() => {
+      if (loginGlowRef.current) loginGlowRef.current.style.opacity = "0.25";
+    }, 350);
+  };
+
+  const handleAuthLostPointerCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activeTouchPointerIdRef.current !== event.pointerId) return;
     activeTouchPointerIdRef.current = null;
     if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
     touchGlowFadeTimeoutRef.current = setTimeout(() => {
@@ -591,13 +603,17 @@ export default function App() {
           onPointerMoveCapture={handleAuthPointerMove}
           onPointerUp={handleAuthPointerRelease}
           onPointerCancel={handleAuthPointerRelease}
-          className="flex-1 flex flex-col justify-between items-center p-6 bg-linear-to-b from-background via-muted/10 to-muted/20 relative min-h-screen"
+          onLostPointerCapture={handleAuthLostPointerCapture}
+          className="flex-1 flex flex-col justify-between items-center p-6 bg-linear-to-b from-background via-muted/10 to-muted/20 relative min-h-screen touch-pan-y"
         >
           <div
             ref={loginGlowRef}
             aria-hidden="true"
             className="absolute left-0 top-0 z-0 h-80 w-80 rounded-full blur-3xl opacity-25 pointer-events-none will-change-transform"
-            style={{ background: `radial-gradient(circle, ${loginGlowColor[accentColor]} 0%, transparent 68%)` }}
+            style={{
+              background: `radial-gradient(circle, ${loginGlowColor[accentColor]} 0%, transparent 68%)`,
+              transform: "translate3d(var(--login-glow-x, 0px), var(--login-glow-y, 0px), 0)",
+            }}
           />
           {/* Subtle background nodes */}
           <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-zinc-400/5 rounded-full blur-3xl pointer-events-none"></div>
@@ -610,7 +626,23 @@ export default function App() {
             </div>
           </div>
 
-          <main className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 shadow-md text-center space-y-6 relative z-10">
+          <motion.div
+            className="w-full max-w-sm relative z-10"
+            animate={shouldReduceMotion ? undefined : { y: [0, -4, 0] }}
+            transition={shouldReduceMotion ? undefined : { duration: 5, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <motion.div
+              aria-hidden="true"
+              className="absolute inset-0 rounded-2xl border border-emerald-400/30 pointer-events-none"
+              animate={shouldReduceMotion ? { opacity: 0 } : {
+                opacity: [0.1, isCoarseTouchDevice() ? 0.32 : 0.22, 0.1],
+                boxShadow: isCoarseTouchDevice()
+                  ? ["0 0 5px rgba(57,255,20,0.08)", "0 0 11px rgba(57,255,20,0.18)", "0 0 5px rgba(57,255,20,0.08)"]
+                  : ["0 0 4px rgba(57,255,20,0.06)", "0 0 8px rgba(57,255,20,0.12)", "0 0 4px rgba(57,255,20,0.06)"],
+              }}
+              transition={shouldReduceMotion ? undefined : { duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+            />
+          <main className="w-full bg-card border border-border rounded-2xl p-8 shadow-md text-center space-y-6 relative z-10">
             <div className="space-y-3">
               <div className="mx-auto flex justify-center">
                 <LogoSymbol className="w-12 h-12" touchInteractive />
@@ -641,6 +673,7 @@ export default function App() {
               <span>Verified Identity Handshake Powered by Clerk</span>
             </div>
           </main>
+          </motion.div>
 
           <footer className="w-full max-w-5xl text-center text-[11px] font-mono text-muted-foreground/70 py-4">
             © {new Date().getFullYear()} OMNISCRIPT. Crafted with structural precision.

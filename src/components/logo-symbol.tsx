@@ -61,13 +61,13 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
     cyan: "from-cyan-500/35 to-cyan-600/0"
   }[accentColor] || "from-emerald-500/35 to-emerald-600/0";
   const touchGlowGradient = {
-    blue: "from-blue-500/40 to-blue-600/0",
-    purple: "from-violet-500/40 to-violet-600/0",
-    emerald: "from-emerald-500/40 to-emerald-600/0",
-    orange: "from-orange-500/40 to-orange-600/0",
-    rose: "from-rose-500/40 to-rose-600/0",
-    cyan: "from-cyan-500/40 to-cyan-600/0"
-  }[accentColor] || "from-emerald-500/40 to-emerald-600/0";
+    blue: "from-blue-500/42 to-blue-600/0",
+    purple: "from-violet-500/42 to-violet-600/0",
+    emerald: "from-emerald-500/42 to-emerald-600/0",
+    orange: "from-orange-500/42 to-orange-600/0",
+    rose: "from-rose-500/42 to-rose-600/0",
+    cyan: "from-cyan-500/42 to-cyan-600/0"
+  }[accentColor] || "from-emerald-500/42 to-emerald-600/0";
 
   return (
     /* Outer wrapper: Handles continuous float micro-motion, stationary during active AI generation */
@@ -126,8 +126,9 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
             transition: { type: "spring", stiffness: 350, damping: 20 }
           },
           touchActive: {
-            scale: shouldReduceMotion ? 1.01 : 1.06,
-            rotate: shouldReduceMotion ? 0 : -3.5,
+            y: shouldReduceMotion ? 0 : -4,
+            scale: shouldReduceMotion ? 1.01 : 1.035,
+            rotate: shouldReduceMotion ? 0 : 2,
             filter: "brightness(1.12)",
             transition: { type: "spring", stiffness: 350, damping: 20 }
           }
@@ -176,7 +177,7 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
             },
             touchActive: {
               scale: shouldReduceMotion ? 1.03 : 1.14,
-              opacity: 0.68,
+              opacity: 0.7,
               transition: { duration: 0.3 }
             }
           }}
