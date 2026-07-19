@@ -25,6 +25,15 @@ The project explores what a polished AI application requires beyond a single mod
 - **Production deployment support** for Vercel-compatible frontend hosting and Render-compatible API hosting.
 - **Clean architecture** with typed validation, repository boundaries, and React Query server-state caching.
 
+## 🌐 Live Demo
+
+Experience the live production deployment of **OMNISCRIPT**:
+
+**Application:**  
+👉https://omniscript-one.vercel.app/
+
+> **Note:** The frontend is deployed on Vercel and communicates with the backend API hosted separately.
+
 ### Tool Calling
 
 The assistant can intelligently invoke external tools when a request needs deterministic computation, current date and time, or fresh web information instead of relying only on the language model. Tool calls are validated and executed on the server, streamed through the chat experience, persisted with the relevant assistant message, and then supplied back to the model for a natural-language answer.
