@@ -74,6 +74,7 @@ export default function App() {
   const touchGlowFrameRef = useRef<number>(0);
   const touchGlowFadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchGlowPositionRef = useRef({ x: 0, y: 0 });
+  const activeTouchPointerIdRef = useRef<number | null>(null);
   const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   const isUsingFallbackKey = !clerkPublishableKey?.trim();
 
@@ -122,27 +123,34 @@ export default function App() {
         if (!glow) return;
         const { x, y } = touchGlowPositionRef.current;
         glow.style.transform = `translate3d(${x - 160}px, ${y - 160}px, 0)`;
-        glow.style.opacity = "0.35";
+        glow.style.opacity = "0.295";
       });
     }
   };
 
+  const isCoarseTouchDevice = () =>
+    typeof window !== "undefined" && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+
   const handleAuthPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "mouse") return;
+    if (event.pointerType === "mouse" || !isCoarseTouchDevice()) return;
     if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
+    activeTouchPointerIdRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
     updateTouchGlow(event.clientX, event.clientY);
   };
 
   const handleAuthPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "mouse") updateTouchGlow(event.clientX, event.clientY);
+    if (event.pointerType !== "mouse" && activeTouchPointerIdRef.current === event.pointerId) {
+      updateTouchGlow(event.clientX, event.clientY);
+    }
   };
 
   const handleAuthPointerRelease = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "mouse") return;
+    if (event.pointerType === "mouse" || activeTouchPointerIdRef.current !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    activeTouchPointerIdRef.current = null;
     if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
     touchGlowFadeTimeoutRef.current = setTimeout(() => {
       if (loginGlowRef.current) loginGlowRef.current.style.opacity = "0.25";
@@ -580,7 +588,7 @@ export default function App() {
         <div
           ref={authPageRef}
           onPointerDown={handleAuthPointerDown}
-          onPointerMove={handleAuthPointerMove}
+          onPointerMoveCapture={handleAuthPointerMove}
           onPointerUp={handleAuthPointerRelease}
           onPointerCancel={handleAuthPointerRelease}
           className="flex-1 flex flex-col justify-between items-center p-6 bg-linear-to-b from-background via-muted/10 to-muted/20 relative min-h-screen"

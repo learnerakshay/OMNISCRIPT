@@ -26,8 +26,11 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
     };
   }, [isTouchPressed]);
 
+  const isCoarseTouchDevice = () =>
+    typeof window !== "undefined" && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (touchInteractive && event.pointerType !== "mouse") setIsTouchPressed(true);
+    if (touchInteractive && event.pointerType !== "mouse" && isCoarseTouchDevice()) setIsTouchPressed(true);
   };
 
   const handlePointerRelease = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -57,6 +60,14 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
     rose: "from-rose-500/35 to-rose-600/0",
     cyan: "from-cyan-500/35 to-cyan-600/0"
   }[accentColor] || "from-emerald-500/35 to-emerald-600/0";
+  const touchGlowGradient = {
+    blue: "from-blue-500/40 to-blue-600/0",
+    purple: "from-violet-500/40 to-violet-600/0",
+    emerald: "from-emerald-500/40 to-emerald-600/0",
+    orange: "from-orange-500/40 to-orange-600/0",
+    rose: "from-rose-500/40 to-rose-600/0",
+    cyan: "from-cyan-500/40 to-cyan-600/0"
+  }[accentColor] || "from-emerald-500/40 to-emerald-600/0";
 
   return (
     /* Outer wrapper: Handles continuous float micro-motion, stationary during active AI generation */
@@ -98,7 +109,7 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
       <motion.div
         className="relative w-full h-full select-none cursor-pointer"
         whileHover="hover"
-        animate={isGenerating ? "generating" : isTouchPressed ? "hover" : "idle"}
+        animate={isGenerating ? "generating" : isTouchPressed ? "touchActive" : "idle"}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerRelease}
         onPointerCancel={handlePointerRelease}
@@ -113,12 +124,18 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
             rotate: shouldReduceMotion ? 0 : -3.5,
             filter: "brightness(1.12)",
             transition: { type: "spring", stiffness: 350, damping: 20 }
+          },
+          touchActive: {
+            scale: shouldReduceMotion ? 1.01 : 1.06,
+            rotate: shouldReduceMotion ? 0 : -3.5,
+            filter: "brightness(1.12)",
+            transition: { type: "spring", stiffness: 350, damping: 20 }
           }
         }}
       >
         {/* Soft Premium Radial Glow (expanded / pulsed during active generation) */}
         <motion.div
-          className={`absolute -inset-4 rounded-full blur-xl bg-gradient-to-br ${glowGradient} pointer-events-none z-0`}
+          className={`absolute -inset-4 rounded-full blur-xl bg-gradient-to-br ${isTouchPressed ? touchGlowGradient : glowGradient} pointer-events-none z-0`}
           animate={isGenerating ? {
             opacity: [0.5, 0.8, 0.5],
             scale: [1.05, 1.25, 1.05]
@@ -133,6 +150,11 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
           variants={{
             hover: { 
               opacity: 1, 
+              scale: shouldReduceMotion ? 1.05 : 1.35,
+              transition: { type: "spring", stiffness: 200, damping: 25 }
+            },
+            touchActive: {
+              opacity: 1,
               scale: shouldReduceMotion ? 1.05 : 1.35,
               transition: { type: "spring", stiffness: 200, damping: 25 }
             }
@@ -150,6 +172,11 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchI
             hover: {
               scale: shouldReduceMotion ? 1.03 : 1.14,
               opacity: 0.6,
+              transition: { duration: 0.3 }
+            },
+            touchActive: {
+              scale: shouldReduceMotion ? 1.03 : 1.14,
+              opacity: 0.68,
               transition: { duration: 0.3 }
             }
           }}
