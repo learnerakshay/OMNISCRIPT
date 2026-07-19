@@ -11,11 +11,11 @@ interface RootProviderProps {
 }
 
 // Retrieve Clerk publishable key from environment variables
-const PUBLISHABLE_KEY = import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 export function RootProvider({ children }: RootProviderProps) {
-  // If the key is missing or is just a placeholder, render a beautiful Setup Guide
-  const isKeyMissing = !PUBLISHABLE_KEY || PUBLISHABLE_KEY.includes("YOUR_") || PUBLISHABLE_KEY === "pk_test_...";
+  // Render the setup guide only when Vite did not provide a publishable key.
+  const isKeyMissing = !clerkPublishableKey?.trim();
 
   if (isKeyMissing) {
     return (
@@ -97,7 +97,7 @@ export function RootProvider({ children }: RootProviderProps) {
                       Open the <strong>Settings</strong> or <strong>Secrets</strong> panel in AI Studio and add:
                     </p>
                     <code className="block bg-zinc-50 border border-zinc-200/60 p-2 rounded text-[10px] font-mono text-zinc-800 break-all select-all">
-                      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_..."
+                      VITE_CLERK_PUBLISHABLE_KEY="pk_test_..."
                     </code>
                   </div>
                 </div>
@@ -143,7 +143,7 @@ export function RootProvider({ children }: RootProviderProps) {
   }
 
   return (
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+    <ClerkProvider publishableKey={clerkPublishableKey}>
       <QueryProvider>
         <AccentProvider>
           <SettingsProvider>

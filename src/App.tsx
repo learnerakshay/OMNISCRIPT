@@ -70,7 +70,8 @@ export default function App() {
   const { playSound } = useSounds();
   const [isHeaderRippling, setIsHeaderRippling] = useState(false);
   const loginGlowRef = useRef<HTMLDivElement>(null);
-  const isUsingFallbackKey = !import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+  const isUsingFallbackKey = !clerkPublishableKey?.trim();
 
   useEffect(() => {
     if (user || typeof window === "undefined") return;

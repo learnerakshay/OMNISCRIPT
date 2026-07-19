@@ -129,14 +129,14 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
 
 ## Environment Variables
 
-`.env` stores local secrets and is ignored by Git. `.env.example` contains placeholders only. Backend secrets must never be exposed through `VITE_` or `NEXT_PUBLIC_` variables.
+`.env` stores local secrets and is ignored by Git. `.env.example` contains placeholders only. Backend secrets must never be exposed through `VITE_` variables.
 
 | Variable | Purpose | Scope |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | OpenAI model access | Backend secret |
 | `TAVILY_API_KEY` | Tavily web search access | Backend secret |
 | `CLERK_SECRET_KEY` | Clerk token verification in Express | Backend secret |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk browser client configuration | Frontend public |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk browser client configuration | Frontend public |
 | `DATABASE_URL` | Preferred PostgreSQL connection string | Backend secret |
 | `SQL_HOST` | Cloud SQL or PostgreSQL host fallback | Backend secret |
 | `SQL_DB_NAME` | PostgreSQL database name fallback | Backend secret |
@@ -162,7 +162,7 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
 
 ### Frontend
 
-The Vite frontend can be deployed to Vercel. Set `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`; when the API is hosted separately, set `VITE_API_BASE_URL` to the Render API origin. Leave `VITE_API_BASE_URL` empty when Express serves the built frontend from the same origin.
+The Vite frontend can be deployed to Vercel. Set `VITE_CLERK_PUBLISHABLE_KEY`; when the API is hosted separately, set `VITE_API_BASE_URL` to the Render API origin. Leave `VITE_API_BASE_URL` empty when Express serves the built frontend from the same origin.
 
 ### Backend
 
