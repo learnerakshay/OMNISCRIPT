@@ -49,6 +49,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { useSounds } from "./hooks/use-sounds";
 
 const TITLE_STOP_WORDS = new Set(["a", "an", "and", "are", "be", "brief", "can", "explain", "give", "in", "is", "it", "me", "of", "please", "tell", "the", "to", "what", "with", "you"]);
+const MINIMUM_SPLASH_DURATION_MS = 3300;
 
 function createConciseTitle(prompt: string): string {
   const normalized = prompt.replace(/[^a-zA-Z0-9/]+/g, " ").trim();
@@ -70,6 +71,7 @@ export default function App() {
   const { settings } = useUserSettings();
   const { playSound } = useSounds();
   const [isHeaderRippling, setIsHeaderRippling] = useState(false);
+  const [hasMinimumSplashElapsed, setHasMinimumSplashElapsed] = useState(false);
   const authPageRef = useRef<HTMLDivElement>(null);
   const loginGlowRef = useRef<HTMLDivElement>(null);
   const touchGlowFrameRef = useRef<number>(0);
@@ -78,6 +80,11 @@ export default function App() {
   const activeTouchPointerIdRef = useRef<number | null>(null);
   const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   const isUsingFallbackKey = !clerkPublishableKey?.trim();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHasMinimumSplashElapsed(true), MINIMUM_SPLASH_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (user || typeof window === "undefined") return;
@@ -348,7 +355,7 @@ export default function App() {
   }, [isSettingsOpen, isMobileDrawerOpen, settings.keyboardNavigation]);
 
   // Centered, premium loading experience centered on the OMNISCRIPT logo
-  if (!isLoaded) {
+  if (!isLoaded || !hasMinimumSplashElapsed) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center relative select-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -683,7 +690,7 @@ export default function App() {
 
       {/* SIGNED IN APP MAIN CONTAINER */}
       <SignedIn>
-        <div className="flex-1 flex h-screen overflow-hidden relative">
+        <div className="flex-1 flex h-[100dvh] md:h-screen overflow-hidden relative">
           
           {/* Responsive Sidebar - Persistent Desktop, Sliding Mobile drawer */}
           <div className="hidden md:block shrink-0">
@@ -892,7 +899,7 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -15 }}
                       transition={{ duration: 0.3 }}
-                      className="flex-1 flex flex-col justify-center py-10 space-y-10"
+                      className="flex-1 flex flex-col justify-center py-10 pb-[calc(11.25rem+env(safe-area-inset-bottom))] sm:pb-10 space-y-10"
                     >
                       <div className="text-center space-y-4">
                         <div className="flex justify-center">
