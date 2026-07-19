@@ -1,6 +1,37 @@
 # OMNISCRIPT
 
-OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combines authenticated conversations, streaming OpenAI responses, server-side tools including Tavily web search, and PostgreSQL-backed conversation branching.
+OMNISCRIPT began as an extension assignment for a Generative AI JavaScript Cohort. Instead of limiting the work to an incremental ChaiGPT feature, the project became an opportunity to apply the cohort's lessons to a complete standalone AI workspace. The result is a production-style full-stack application with authentication, persistent conversations, chat branching, AI tool calling, and a modern, scalable architecture.
+
+## Project Overview
+
+OMNISCRIPT is an authenticated AI chat workspace built for reliable, long-lived conversations. It combines a responsive React interface with an Express API, PostgreSQL persistence, Clerk authentication, OpenAI-powered streaming, and server-side tools. Conversations, branch paths, messages, and tool results remain available after refresh, allowing users to continue work without losing context.
+
+## Motivation
+
+The project explores what a polished AI application requires beyond a single model request: secure user identity, persistent data, responsive streaming, useful tools, clear error handling, and a maintainable foundation for future integrations. OMNISCRIPT deliberately treats these capabilities as connected product systems rather than isolated demonstrations.
+
+## Features
+
+- **AI conversational interface** with real-time streamed responses.
+- **Persistent conversations** backed by PostgreSQL and Prisma.
+- **Chat branching** for alternate continuations while preserving shared history.
+- **Clerk authentication** with server-side bearer-token verification and ownership checks.
+- **OpenAI integration** through the AI SDK streaming workflow.
+- **Tool Calling support** for intelligent, server-side tool invocation.
+- **Third-party API integration**, currently Tavily-powered Web Search.
+- **External knowledge retrieval** for up-to-date information and relevant web resources.
+- **Calculator and current date/time tools** with validated inputs and controlled errors.
+- **Responsive, dark-first UI** with desktop and mobile support.
+- **Production deployment support** for Vercel-compatible frontend hosting and Render-compatible API hosting.
+- **Clean architecture** with typed validation, repository boundaries, and React Query server-state caching.
+
+### Tool Calling
+
+The assistant can intelligently invoke external tools when a request needs deterministic computation, current date and time, or fresh web information instead of relying only on the language model. Tool calls are validated and executed on the server, streamed through the chat experience, persisted with the relevant assistant message, and then supplied back to the model for a natural-language answer.
+
+### Third-Party Integration
+
+OMNISCRIPT integrates external APIs to enrich responses with current information. Tavily Web Search retrieves relevant web resources and structured search results through a backend-only API key; the assistant uses those results to form its final response. The tool registry and result-rendering flow are intentionally designed so additional integrations can be added with minimal changes.
 
 # 📸 Application Screenshots
 
@@ -36,51 +67,52 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
 
 ## Technology Stack
 
-### Frontend
+| Area | Technologies |
+| --- | --- |
+| Frontend | React 19, TypeScript, Vite 6, Tailwind CSS 4, Motion for React |
+| Client state | TanStack React Query |
+| Authentication | Clerk React and Clerk Backend |
+| AI | OpenAI, AI SDK, server-sent events |
+| Tools | Tavily Search API, Zod validation |
+| Backend | Node.js, Express, TypeScript |
+| Data | PostgreSQL, Prisma, Prisma migrations |
+| Rendering | React Markdown, remark-gfm, Lucide React |
+| Deployment | Vercel-compatible frontend and Render-compatible Express API |
 
-- React 19 and TypeScript
-- Vite 6 and Tailwind CSS 4
-- Motion for React interface transitions
-- TanStack React Query for server-state caching
-- Clerk React for authentication UI and session tokens
-- React Markdown with remark-gfm for message rendering
-- Lucide React icons
+## Architecture
 
-### Backend
+```text
+React + Vite client
+  ├─ Clerk session and authenticated UI
+  ├─ React Query conversation, branch, and message caches
+  └─ Streaming chat and persisted tool-result cards
+             │
+             ▼
+Express API
+  ├─ Clerk bearer-token verification
+  ├─ Zod request validation and ownership checks
+  ├─ OpenAI AI SDK streaming and tool orchestration
+  └─ Prisma repository layer
+             │
+             ▼
+PostgreSQL
+  ├─ Conversations and messages
+  ├─ Conversation branches and active-branch state
+  └─ Persisted tool metadata and results
+```
 
-- Node.js with Express and TypeScript
-- OpenAI AI SDK with the OpenAI provider
-- Tavily Search API for server-side web search
-- Clerk Backend for bearer-token verification
-- Zod request and tool-input validation
-- Prisma Client for database access
+### Request Lifecycle
 
-### Database
+1. Clerk resolves the user session in the browser.
+2. React Query loads the user's conversations, branch metadata, and selected branch history.
+3. A new prompt creates a conversation when required, resolves its active branch, and persists the user message.
+4. Express verifies the Clerk token, validates the request, and confirms ownership.
+5. The AI SDK streams a response or selects a registered server-side tool.
+6. Tool execution and status are streamed to the client; structured results are persisted with the assistant message.
+7. The result is returned to the model for a final natural-language response.
+8. React Query refreshes the precise conversation and branch caches so the completed history remains visible after refresh.
 
-- PostgreSQL
-- Prisma schema and checked-in Prisma migrations
-
-### Infrastructure
-
-- Vercel-compatible Vite frontend deployment
-- Render-compatible Express backend deployment
-- Git and GitHub source control
-
-## Application Workflow
-
-1. The browser loads the application and Clerk resolves the current session.
-2. Signed-in users can create a conversation or open a persisted one; signed-out users see the authentication entry points.
-3. React Query retrieves the conversation list, branch metadata, and branch-specific message history.
-4. A submitted message creates a conversation when necessary, persists the user message, and resolves the active branch.
-5. The backend verifies the Clerk bearer token, validates the request, checks conversation ownership, and appends the message to the selected branch.
-6. The streaming route rebuilds branch-safe history and asks the OpenAI model to respond or select a registered tool.
-7. Calculator, current date and time, and Tavily web search execute on the server when selected. Their state and final text stream to the client over Server-Sent Events.
-8. Tool output is supplied back to the model for a final natural-language response. Assistant text and tool metadata are stored in the assistant message content.
-9. React Query invalidates the relevant conversation, branch, and message entries so persisted history remains visible after refresh.
-10. Branches share history before their fork point and retain independent continuation history afterward. Rename and conversation deletion operate on persisted records; pinning is stored locally in the browser.
-11. Branch-aware message deletion removes dependent message lineage and branches transactionally while preserving unrelated branches. When no messages remain, the conversation is removed and the UI returns to New Chat.
-
-## Repository Structure
+## Folder Structure
 
 ```text
 .
@@ -95,12 +127,23 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
 │   ├── schema.prisma           # PostgreSQL models and relations
 │   └── migrations/             # Versioned database migrations
 ├── public/                     # Browser assets, including the favicon
+├── assets/                     # Product screenshots used in this README
 ├── server.ts                   # Express API, auth middleware, and streaming route
 ├── vite.config.ts              # Vite and frontend environment configuration
 └── .env.example                # Environment variable names and placeholders
 ```
 
-## Local Development
+## Installation
+
+### Prerequisites
+
+- Node.js 18 or later
+- PostgreSQL database
+- Clerk application credentials
+- OpenAI API key
+- Tavily API key for web-search support
+
+### Setup
 
 1. Clone the repository and install dependencies:
 
@@ -108,28 +151,22 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
    npm install
    ```
 
-2. Copy `.env.example` to `.env` and configure local values.
+2. Copy `.env.example` to `.env` and add the required values.
 3. Generate the Prisma client:
 
    ```bash
    npx prisma generate
    ```
 
-4. Apply pending migrations when connecting a new local database:
+4. Apply pending migrations for a new local database:
 
    ```bash
    npx prisma migrate dev
    ```
 
-5. Start the development server:
-
-   ```bash
-   npm run dev
-   ```
-
 ## Environment Variables
 
-`.env` stores local secrets and is ignored by Git. `.env.example` contains placeholders only. Backend secrets must never be exposed through `VITE_` variables.
+`.env` holds local secrets and is ignored by Git. `.env.example` contains placeholders only. Never expose backend secrets through `VITE_` variables.
 
 | Variable | Purpose | Scope |
 | --- | --- | --- |
@@ -147,7 +184,15 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
 | `VITE_API_BASE_URL` | Optional API origin for a separately deployed frontend | Frontend public |
 | `DISABLE_HMR` | Disables Vite HMR and file watching when set to `true` | Development runtime |
 
-## Scripts
+## Local Development
+
+Start the development server after completing the setup steps:
+
+```bash
+npm run dev
+```
+
+Useful commands:
 
 | Command | Description |
 | --- | --- |
@@ -162,12 +207,28 @@ OMNISCRIPT is a production-style AI SaaS workspace for persistent chat. It combi
 
 ### Frontend
 
-The Vite frontend can be deployed to Vercel. Set `VITE_CLERK_PUBLISHABLE_KEY`; when the API is hosted separately, set `VITE_API_BASE_URL` to the Render API origin. Leave `VITE_API_BASE_URL` empty when Express serves the built frontend from the same origin.
+Deploy the Vite frontend to Vercel with `VITE_CLERK_PUBLISHABLE_KEY`. When the API is hosted separately, set `VITE_API_BASE_URL` to the Render API origin. Leave it empty when Express serves the built frontend from the same origin.
 
 ### Backend
 
-The Express service can run on Render with `npm run build` followed by `npm run start`. Configure `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `TAVILY_API_KEY` when web search is enabled, and a PostgreSQL connection. Render supplies `PORT`; the server honors it. For separate frontend deployment, set `APP_URL` to the Vercel origin or a comma-separated set of allowed origins.
+Deploy the Express service to Render with `npm run build` followed by `npm run start`. Configure `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `TAVILY_API_KEY` when web search is enabled, and a PostgreSQL connection. Render supplies `PORT`; the server honors it. For a separate frontend, set `APP_URL` to the Vercel origin or a comma-separated allowlist.
 
 ### Database
 
-Use PostgreSQL with either `DATABASE_URL` or the supported `SQL_*` fallback values. Run `npx prisma generate` during build or deployment setup and apply migrations through the normal Prisma migration workflow before serving production traffic.
+Use PostgreSQL with either `DATABASE_URL` or the supported `SQL_*` fallback values. Run `npx prisma generate` during build or deployment setup, and apply migrations through the standard Prisma workflow before serving production traffic.
+
+## Future Improvements
+
+- Multi-model provider selection and per-conversation model preferences.
+- File upload, document-aware chat, and retrieval-augmented generation.
+- Conversation export to Markdown and PDF.
+- Shared conversations and team workspaces.
+- Rich in-answer source citations for web-search responses.
+- Voice input and text-to-speech responses.
+- Custom user-created tools and integrations.
+- Usage analytics, token tracking, and cost monitoring.
+- Automated summaries and long-context compression.
+
+## License
+
+No license has been specified for this repository. Add a license file before distributing or accepting external contributions.

@@ -16,6 +16,10 @@ The chat workspace persists both user and assistant messages and renders assista
 
 The OpenAI AI SDK receives registered tool definitions and can choose a tool automatically. The backend normalizes tool-call formats, parses JSON arguments, validates them with Zod, streams tool status, executes the tool server-side, and supplies the structured result back to the model for the final response. The final assistant message stores the tool name, input-facing metadata, completion or failure state, and applicable result metadata so tool cards render after refresh.
 
+## AI Tool Calling
+
+OMNISCRIPT supports intelligent tool invocation: the assistant decides when a request needs a deterministic calculation, current date and time, or external information instead of relying solely on the language model. Tool execution is seamless within streamed AI responses, with validated inputs, controlled errors, persisted results, and a final natural-language continuation. The registry-based design is extensible, providing a stable foundation for future server-side tools without changing the conversation experience.
+
 ### Calculator
 
 The calculator accepts a required arithmetic `expression` and evaluates a restricted grammar without raw `eval`. It supports arithmetic operators and parentheses, rejects malformed expressions, and returns controlled errors such as division by zero. Its compact result card preserves the expression and displays normalized multiplication and division symbols.
@@ -27,6 +31,12 @@ The date and time tool accepts an optional IANA timezone and returns a formatted
 ### Tavily Web Search
 
 Web search accepts a required, trimmed query and executes through Tavily from the backend only. It limits query length and result count, validates provider output, filters result URLs to HTTP(S), and uses an eight-second timeout. Missing or invalid keys, rate limits, malformed responses, network failures, and timeouts produce controlled errors. Successful searches persist compact title, URL, and snippet metadata; the card shows safe external links and works within branch-specific conversations.
+
+## Third-Party Integrations
+
+### Tavily Web Search
+
+Tavily provides real-time information retrieval and external knowledge lookup. When current information is required, the assistant can retrieve relevant web resources through Tavily and use the structured results in its answer. The backend-only integration protects provider credentials, and the tool architecture provides a foundation for adding additional APIs with the same validation, streaming, persistence, and UI conventions.
 
 ## 5. Chat Branching
 
