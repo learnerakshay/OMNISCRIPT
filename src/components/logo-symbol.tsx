@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type PointerEvent as ReactPointerEvent } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Sparkles } from "lucide-react";
 import { useAccent } from "../providers/accent-provider";
@@ -6,12 +6,33 @@ import { useAccent } from "../providers/accent-provider";
 interface LogoSymbolProps {
   className?: string;
   isGenerating?: boolean;
+  touchInteractive?: boolean;
 }
 
-export function LogoSymbol({ className = "w-9 h-9", isGenerating = false }: LogoSymbolProps) {
+export function LogoSymbol({ className = "w-9 h-9", isGenerating = false, touchInteractive = false }: LogoSymbolProps) {
   const shouldReduceMotion = useReducedMotion();
   const { accentColor } = useAccent();
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [isTouchPressed, setIsTouchPressed] = useState(false);
+
+  useEffect(() => {
+    if (!isTouchPressed) return;
+    const clearTouchPressed = () => setIsTouchPressed(false);
+    window.addEventListener("pointerup", clearTouchPressed, true);
+    window.addEventListener("pointercancel", clearTouchPressed, true);
+    return () => {
+      window.removeEventListener("pointerup", clearTouchPressed, true);
+      window.removeEventListener("pointercancel", clearTouchPressed, true);
+    };
+  }, [isTouchPressed]);
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (touchInteractive && event.pointerType !== "mouse") setIsTouchPressed(true);
+  };
+
+  const handlePointerRelease = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (touchInteractive && event.pointerType !== "mouse") setIsTouchPressed(false);
+  };
 
   // Periodic 3°–5° rotational calibration every 25 seconds
   useEffect(() => {
@@ -77,7 +98,10 @@ export function LogoSymbol({ className = "w-9 h-9", isGenerating = false }: Logo
       <motion.div
         className="relative w-full h-full select-none cursor-pointer"
         whileHover="hover"
-        animate={isGenerating ? "generating" : "idle"}
+        animate={isGenerating ? "generating" : isTouchPressed ? "hover" : "idle"}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerRelease}
+        onPointerCancel={handlePointerRelease}
         variants={{
           idle: { scale: 1 },
           generating: {

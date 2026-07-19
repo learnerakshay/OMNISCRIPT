@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Sparkles, 
@@ -69,7 +69,11 @@ export default function App() {
   const { settings } = useUserSettings();
   const { playSound } = useSounds();
   const [isHeaderRippling, setIsHeaderRippling] = useState(false);
+  const authPageRef = useRef<HTMLDivElement>(null);
   const loginGlowRef = useRef<HTMLDivElement>(null);
+  const touchGlowFrameRef = useRef<number>(0);
+  const touchGlowFadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchGlowPositionRef = useRef({ x: 0, y: 0 });
   const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   const isUsingFallbackKey = !clerkPublishableKey?.trim();
 
@@ -99,6 +103,51 @@ export default function App() {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
     };
   }, [user]);
+
+  useEffect(() => () => {
+    if (touchGlowFrameRef.current) window.cancelAnimationFrame(touchGlowFrameRef.current);
+    if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
+  }, []);
+
+  const updateTouchGlow = (clientX: number, clientY: number) => {
+    const container = authPageRef.current;
+    if (!container) return;
+
+    const bounds = container.getBoundingClientRect();
+    touchGlowPositionRef.current = { x: clientX - bounds.left, y: clientY - bounds.top };
+    if (!touchGlowFrameRef.current) {
+      touchGlowFrameRef.current = window.requestAnimationFrame(() => {
+        touchGlowFrameRef.current = 0;
+        const glow = loginGlowRef.current;
+        if (!glow) return;
+        const { x, y } = touchGlowPositionRef.current;
+        glow.style.transform = `translate3d(${x - 160}px, ${y - 160}px, 0)`;
+        glow.style.opacity = "0.35";
+      });
+    }
+  };
+
+  const handleAuthPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse") return;
+    if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateTouchGlow(event.clientX, event.clientY);
+  };
+
+  const handleAuthPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "mouse") updateTouchGlow(event.clientX, event.clientY);
+  };
+
+  const handleAuthPointerRelease = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse") return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (touchGlowFadeTimeoutRef.current) clearTimeout(touchGlowFadeTimeoutRef.current);
+    touchGlowFadeTimeoutRef.current = setTimeout(() => {
+      if (loginGlowRef.current) loginGlowRef.current.style.opacity = "0.25";
+    }, 350);
+  };
 
   const loginGlowColor: Record<typeof accentColor, string> = {
     blue: "#2563eb",
@@ -528,7 +577,14 @@ export default function App() {
 
       {/* SIGNED OUT AUTH SPLASH SCREEN */}
       <SignedOut>
-        <div className="flex-1 flex flex-col justify-between items-center p-6 bg-linear-to-b from-background via-muted/10 to-muted/20 relative min-h-screen">
+        <div
+          ref={authPageRef}
+          onPointerDown={handleAuthPointerDown}
+          onPointerMove={handleAuthPointerMove}
+          onPointerUp={handleAuthPointerRelease}
+          onPointerCancel={handleAuthPointerRelease}
+          className="flex-1 flex flex-col justify-between items-center p-6 bg-linear-to-b from-background via-muted/10 to-muted/20 relative min-h-screen"
+        >
           <div
             ref={loginGlowRef}
             aria-hidden="true"
@@ -541,7 +597,7 @@ export default function App() {
 
           <div className="w-full max-w-5xl flex items-center justify-start h-16">
             <div className="flex items-center gap-2.5">
-              <LogoSymbol className="w-8 h-8" />
+              <LogoSymbol className="w-8 h-8" touchInteractive />
               <span className="font-display font-bold text-base tracking-tight">OMNISCRIPT</span>
             </div>
           </div>
@@ -549,7 +605,7 @@ export default function App() {
           <main className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 shadow-md text-center space-y-6 relative z-10">
             <div className="space-y-3">
               <div className="mx-auto flex justify-center">
-                <LogoSymbol className="w-12 h-12" />
+                <LogoSymbol className="w-12 h-12" touchInteractive />
               </div>
               <h1 className="font-display font-bold text-2xl tracking-tight text-foreground">
                 Welcome to OMNISCRIPT
