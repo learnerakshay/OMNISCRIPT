@@ -145,7 +145,7 @@ export function MessageBubble({
           className={`relative p-4 rounded-2xl text-sm leading-relaxed border transition-all ${
             isUser
               ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 border-zinc-800 dark:border-zinc-200 rounded-tr-none shadow-xs text-left"
-              : "bg-zinc-100/50 dark:bg-muted/40 text-foreground border-zinc-200/80 dark:border-border rounded-tl-none hover:bg-zinc-100/80 dark:hover:bg-muted/50 w-full min-w-0"
+              : "bg-muted/40 text-foreground border-border rounded-tl-none hover:bg-muted/50 w-full min-w-0"
           }`}
         >
           {isStreaming && !displayText && !activeToolCall ? (
@@ -168,7 +168,7 @@ export function MessageBubble({
 
               {/* Render the core message markdown text */}
               {displayText && (
-                <div className="markdown-body select-text break-words prose prose-zinc dark:prose-invert max-w-none text-xs leading-relaxed selection:bg-zinc-500/20">
+                <div className={`markdown-body select-text break-words ${isUser ? "prose prose-zinc" : "prose prose-invert"} max-w-none text-xs leading-relaxed selection:bg-zinc-500/20`}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -182,7 +182,7 @@ export function MessageBubble({
                               className={`${
                                 isUser
                                   ? "bg-zinc-800 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
-                                  : "bg-zinc-100/80 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
+                                  : "bg-zinc-800 text-zinc-200"
                               } px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold`}
                               {...props}
                             >
@@ -201,7 +201,7 @@ export function MessageBubble({
                       p({ children }) {
                         return (
                           <p className={`mb-4 last:mb-0 leading-relaxed ${
-                            isUser ? "text-inherit" : "text-zinc-950 dark:text-zinc-50"
+                            isUser ? "text-inherit" : "text-zinc-50"
                           }`}>
                             {children}
                           </p>
@@ -210,7 +210,7 @@ export function MessageBubble({
                       ul({ children }) {
                         return (
                           <ul className={`list-disc list-inside ml-4 space-y-1.5 my-4 ${
-                            isUser ? "text-inherit" : "text-zinc-900 dark:text-zinc-100"
+                            isUser ? "text-inherit" : "text-zinc-100"
                           }`}>
                             {children}
                           </ul>
@@ -219,7 +219,7 @@ export function MessageBubble({
                       ol({ children }) {
                         return (
                           <ol className={`list-decimal list-inside ml-4 space-y-1.5 my-4 ${
-                            isUser ? "text-inherit" : "text-zinc-900 dark:text-zinc-100"
+                            isUser ? "text-inherit" : "text-zinc-100"
                           }`}>
                             {children}
                           </ol>
@@ -260,7 +260,7 @@ export function MessageBubble({
                           <blockquote className={`border-l-2 pl-3 italic my-3 ${
                             isUser 
                               ? "border-zinc-700 dark:border-zinc-300 text-zinc-200 dark:text-zinc-700" 
-                              : "border-border/80 text-zinc-600 dark:text-zinc-400"
+                              : "border-border/80 text-zinc-400"
                           }`}>
                             {children}
                           </blockquote>
@@ -275,7 +275,7 @@ export function MessageBubble({
                             className={`transition-colors underline ${
                               isUser 
                                 ? "text-emerald-200 dark:text-emerald-700 hover:text-white dark:hover:text-emerald-900" 
-                                : "text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
+                                : "text-emerald-400 hover:text-emerald-300"
                             }`}
                           >
                             {children}
@@ -323,7 +323,7 @@ export function MessageBubble({
                   </ReactMarkdown>
 
                   {isStreaming && (
-                    <span className="inline-block w-1.5 h-3.5 ml-1 bg-zinc-700 dark:bg-zinc-300 animate-pulse align-middle" />
+                    <span className="inline-block w-1.5 h-3.5 ml-1 bg-zinc-300 animate-pulse align-middle" />
                   )}
                 </div>
               )}

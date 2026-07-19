@@ -176,7 +176,7 @@ export function Sidebar({
       >
         {/* Swipe Quick Actions Behind Panel */}
         {swipingId === conv.id && (
-        <div className="absolute inset-0 bg-zinc-100 dark:bg-muted/40 rounded-xl flex items-center justify-end px-2.5 gap-1.5 z-0">
+        <div className="absolute inset-0 bg-muted/40 rounded-xl flex items-center justify-end px-2.5 gap-1.5 z-0">
           <button
             onClick={(e) => handleTogglePin(e, conv.id)}
             className="shrink-0 p-1.5 rounded-lg shadow-none text-muted-foreground hover:text-foreground hover:bg-card/80 transition-colors duration-150 cursor-pointer"
@@ -213,7 +213,7 @@ export function Sidebar({
           className={`relative z-10 flex items-center gap-3 px-3.5 py-3 rounded-xl transition-all cursor-pointer bg-card border border-transparent select-none ${
             isSelected
               ? `${classes.activeHighlight} border-border shadow-xs`
-              : "text-muted-foreground hover:text-foreground hover:bg-zinc-100 dark:hover:bg-accent/40"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/40"
           }`}
           style={{ x: 0 }}
           whileTap={{ scale: 0.99 }}
@@ -236,7 +236,7 @@ export function Sidebar({
               ) : (
                 <div className="flex flex-col justify-center">
                   <div className="flex items-start justify-between gap-1.5 w-full">
-                    <p className={`min-w-0 text-[11px] sm:text-xs font-medium leading-normal break-words line-clamp-2 ${isSelected ? "text-foreground font-semibold" : "text-zinc-700 dark:text-zinc-300 group-hover:text-foreground"}`}>
+                    <p className={`min-w-0 text-[11px] sm:text-xs font-medium leading-normal break-words line-clamp-2 ${isSelected ? "text-foreground font-semibold" : "text-zinc-300 group-hover:text-foreground"}`}>
                       {conv.title || "Untitled Chat"}
                     </p>
                     {isPinned && (
@@ -454,20 +454,20 @@ export function Sidebar({
             {[1, 2, 3, 4, 5].map((n) => (
               <div
                 key={n}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-200/60 dark:bg-muted/20 animate-pulse ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl bg-muted/20 animate-pulse ${
                   isCollapsed ? "justify-center" : ""
                 }`}
               >
-                <div className="w-4 h-4 bg-zinc-300 dark:bg-muted/40 rounded-md shrink-0"></div>
+                <div className="w-4 h-4 bg-muted/40 rounded-md shrink-0"></div>
                 {!isCollapsed && (
-                  <div className="h-3.5 bg-zinc-300 dark:bg-muted/30 rounded-md w-3/4"></div>
+                  <div className="h-3.5 bg-muted/30 rounded-md w-3/4"></div>
                 )}
               </div>
             ))}
           </div>
         ) : filtered.length === 0 ? (
           !isCollapsed && (
-            <div className="py-10 text-center text-xs text-muted-foreground italic px-4 border border-dashed border-zinc-300 dark:border-border/60 rounded-xl bg-zinc-100/80 dark:bg-muted/10 mx-2">
+            <div className="py-10 text-center text-xs text-muted-foreground italic px-4 border border-dashed border-border/60 rounded-xl bg-muted/10 mx-2">
               <Search className="w-4 h-4 mx-auto mb-2 text-muted-foreground/40" />
               <p className="font-medium text-foreground/80">No results found</p>
               {search && <p className="text-[10px] mt-1 opacity-70">No chats match "{search}"</p>}
@@ -500,11 +500,11 @@ export function Sidebar({
       </div>
 
       {/* User Actions footer */}
-      <div className="p-3 border-t border-border bg-zinc-50/70 dark:bg-muted/10 space-y-2">
+      <div className="p-3 border-t border-border bg-muted/10 space-y-2">
         <div className={isCollapsed ? "flex justify-center" : "flex justify-end"}>
           <button
             onClick={onOpenSettings}
-            className={`p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-zinc-100 dark:hover:bg-accent transition-colors shadow-xs cursor-pointer ${isCollapsed ? "" : "shrink-0"}`}
+            className={`p-2 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shadow-xs cursor-pointer ${isCollapsed ? "" : "shrink-0"}`}
             title="Settings"
             aria-label="Settings"
           >
@@ -513,7 +513,7 @@ export function Sidebar({
         </div>
 
         {/* Row 2: User Profile block */}
-        <div className="pt-2 border-t border-zinc-200/80 dark:border-border/40">
+        <div className="pt-2 border-t border-border/40">
           {isCollapsed ? (
             <div className="flex justify-center">
               {user?.imageUrl ? (

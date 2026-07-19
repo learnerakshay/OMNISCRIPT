@@ -110,7 +110,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -126,13 +126,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
             transition={{ type: "spring", duration: 0.4 }}
-            className="relative w-full max-w-3xl h-[600px] bg-card text-foreground border border-border rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col"
+            className="relative w-[calc(100vw-1.5rem)] max-w-3xl h-[calc(100dvh-1.5rem)] max-h-[600px] sm:w-full sm:h-[600px] bg-card text-foreground border border-border rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col"
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
           >
             {/* Header */}
-            <div className="p-5 border-b border-zinc-200 dark:border-border flex items-center justify-between bg-zinc-50 dark:bg-muted/20 shrink-0">
+            <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between bg-muted/20 shrink-0">
               <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-muted-foreground" />
                 <h2 id="settings-title" className="font-display font-semibold text-base text-foreground">
@@ -141,7 +141,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
               </div>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg border border-border hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                className="min-w-10 min-h-10 sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 rounded-lg border border-border hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                 aria-label="Close dialog"
               >
                 <X className="w-4 h-4" />
@@ -149,10 +149,10 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             </div>
 
             {/* Split Sidebar & Content Workspace */}
-            <div className="flex-1 flex min-h-0">
+            <div className="flex-1 flex flex-col sm:flex-row min-h-0">
               {/* Vertical Tab Sidebar */}
-              <div className="w-56 border-r border-zinc-200 dark:border-border bg-zinc-50/50 dark:bg-muted/10 p-3 flex flex-col justify-between shrink-0">
-                <div className="space-y-1">
+              <div className="w-full sm:w-56 border-b sm:border-b-0 sm:border-r border-border bg-muted/10 p-2 sm:p-3 flex flex-row sm:flex-col sm:justify-between gap-2 shrink-0">
+                <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto sm:block sm:space-y-1 custom-scrollbar">
                   {tabs.map((tab) => {
                     const Icon = tab.icon;
                     const isActive = activeTab === tab.id;
@@ -160,7 +160,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
-                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium tracking-wide transition-all cursor-pointer ${
+                        className={`shrink-0 sm:w-full flex items-center gap-2 sm:gap-3 px-3 py-2.5 rounded-xl text-xs font-medium tracking-wide transition-all cursor-pointer whitespace-nowrap ${
                           isActive 
                             ? `${classes.accentBg} ${classes.text} border border-border/40 font-semibold shadow-xs` 
                             : "text-muted-foreground hover:bg-accent hover:text-foreground border border-transparent"
@@ -175,7 +175,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                 </div>
 
                 {/* Reset Buttons */}
-                <div className="pt-4 border-t border-border/80 px-2">
+                <div className="shrink-0 border-l sm:border-l-0 sm:border-t border-border/80 pl-2 sm:px-2 sm:pt-4">
                   <button
                     onClick={() => {
                       resetSettings();
@@ -186,7 +186,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                         variant: "success"
                       });
                     }}
-                    className="w-full text-center text-[10px] font-semibold text-muted-foreground hover:text-destructive hover:underline tracking-wide uppercase transition-colors py-1 cursor-pointer"
+                    className="w-full whitespace-nowrap text-center text-[10px] font-semibold text-muted-foreground hover:text-destructive hover:underline tracking-wide uppercase transition-colors py-2 sm:py-1 cursor-pointer"
                   >
                     Reset All Defaults
                   </button>
@@ -194,7 +194,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
               </div>
 
               {/* Dynamic Settings Content Frame */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 space-y-6">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={activeTab}
