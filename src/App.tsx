@@ -231,6 +231,12 @@ export default function App() {
   const activeBranch = branchState?.branches.find((branch) => branch.id === resolvedBranchId);
 
   useEffect(() => {
+    if (!isLoadingConversations && selectedConvId && !conversations?.some((conversation) => conversation.id === selectedConvId)) {
+      setSelectedConvId(null);
+    }
+  }, [conversations, isLoadingConversations, selectedConvId]);
+
+  useEffect(() => {
     setActiveBranchId(branchState?.activeBranchId ?? null);
   }, [selectedConvId, branchState?.activeBranchId]);
 
@@ -261,10 +267,11 @@ export default function App() {
   } | null>(null);
   const [streamingCitations, setStreamingCitations] = useState<Array<{ title: string; url: string; snippet?: string }> | null>(null);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
+  const isConversationResolving = Boolean(selectedConvId) && (isLoadingBranches || !resolvedBranchId || isLoadingMessages);
   const shouldShowLandingHero = !selectedConvId || (
-    !isLoadingMessages && !isLoadingBranches &&
     !isStreaming &&
-    (messages?.length ?? 0) === 0
+    !isConversationResolving &&
+    messages?.length === 0
   );
 
   // Auto-resize composer textarea height
@@ -947,7 +954,7 @@ export default function App() {
                       exit={{ opacity: 0 }}
                       className="flex-1 flex flex-col space-y-6"
                     >
-                      {isLoadingMessages ? (
+                      {isConversationResolving ? (
                         /* Premium Shimmer Skeleton Loader */
                         <div className="flex-1 flex flex-col gap-6 pt-4 pb-[180px] sm:pb-[200px] md:pb-[220px] w-full">
                           {[1, 2, 3].map((n) => (
@@ -965,12 +972,6 @@ export default function App() {
                               </div>
                             </div>
                           ))}
-                        </div>
-                      ) : (!messages || messages.length === 0) && !isStreaming ? (
-                        <div className="flex-1 flex flex-col items-center justify-center py-20 text-center space-y-3">
-                           <MessageSquare className="w-8 h-8 text-muted-foreground animate-bounce" />
-                           <p className="text-xs font-semibold text-muted-foreground">Active session initialized.</p>
-                           <p className="text-[11px] text-muted-foreground/80 max-w-xs">Type your custom instruction below to write a message to the relational layer.</p>
                         </div>
                       ) : (
                         <div className="flex-1 flex flex-col gap-6 pb-[180px] sm:pb-[200px] md:pb-[220px]">
