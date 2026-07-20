@@ -22,6 +22,7 @@ export interface DeleteMessageResult {
 }
 
 const MAX_BRANCH_CREATE_ATTEMPTS = 2;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function logBranchOperation(event: string, details: Record<string, string | number | undefined>) {
   console.info(JSON.stringify({ event, ...details }));
@@ -29,6 +30,14 @@ function logBranchOperation(event: string, details: Record<string, string | numb
 
 function isSiblingOrderConflict(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+function logBranchLookup(event: string, details: Record<string, string | boolean | undefined>) {
+  console.info(JSON.stringify({ event, ...details }));
 }
 
 function toBranchMetadata(branches: ConversationBranch[]): BranchMetadata[] {
@@ -59,25 +68,68 @@ async function validateOwnership(id: string, userId: string, client: Prisma.Tran
 }
 
 async function requireBranch(conversationId: string, branchId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
-  const branch = await client.conversationBranch.findFirst({ where: { id: branchId, conversationId } });
-  if (!branch) throw new NotFoundError("Branch not found.");
-  return branch;
+  if (!isUuid(conversationId) || !isUuid(branchId)) {
+    logBranchLookup("branch_lookup_rejected", {
+      conversationId,
+      branchId,
+      validConversationId: isUuid(conversationId),
+      validBranchId: isUuid(branchId),
+    });
+    throw new NotFoundError("Branch not found.");
+  }
+
+  // A branch ID is globally unique. Query it by its primary key and verify the
+  // conversation separately, instead of constructing a redundant findFirst
+  // filter that is vulnerable to a stale generated client rejecting arguments.
+  logBranchLookup("branch_lookup_started", { conversationId, branchId });
+  try {
+    const branch = await client.conversationBranch.findUnique({ where: { id: branchId } });
+    if (!branch || branch.conversationId !== conversationId) throw new NotFoundError("Branch not found.");
+    return branch;
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    // Keep the complete Prisma validation error in server logs while never
+    // returning database details to the client.
+    console.error("Branch lookup failed.", error);
+    throw error;
+  }
 }
 
 async function ensureRootBranch(conversationId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
   const conversation = await client.conversation.findUnique({ where: { id: conversationId } });
   if (!conversation) throw new NotFoundError("Conversation not found.");
-  if (conversation.activeBranchId) {
-    const active = await client.conversationBranch.findFirst({ where: { id: conversation.activeBranchId, conversationId } });
-    if (active) return active;
+  if (conversation.activeBranchId && isUuid(conversation.activeBranchId)) {
+    try {
+      return await requireBranch(conversationId, conversation.activeBranchId, client);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      // A legacy pointer can reference a removed branch. Fall through to the
+      // persisted root lookup and repair the active pointer below.
+    }
+  } else if (conversation.activeBranchId) {
+    logBranchLookup("branch_lookup_rejected", {
+      conversationId,
+      branchId: conversation.activeBranchId,
+      validConversationId: isUuid(conversationId),
+      validBranchId: false,
+    });
   }
 
   // Existing conversations can have a missing or stale active pointer while
   // being migrated. Reuse their root branch before creating anything new.
-  const root = await client.conversationBranch.findFirst({
-    where: { conversationId, parentBranchId: null },
-    orderBy: { createdAt: "asc" },
-  }) ?? await client.conversationBranch.create({ data: { conversationId, siblingOrder: 0 } });
+  if (!isUuid(conversationId)) throw new NotFoundError("Conversation not found.");
+  logBranchLookup("root_branch_lookup_started", { conversationId });
+  let root: ConversationBranch | null;
+  try {
+    root = await client.conversationBranch.findFirst({
+      where: { conversationId, parentBranchId: null },
+      orderBy: { createdAt: "asc" },
+    });
+  } catch (error) {
+    console.error("Root branch lookup failed.", error);
+    throw error;
+  }
+  root ??= await client.conversationBranch.create({ data: { conversationId, siblingOrder: 0 } });
   await client.conversation.update({ where: { id: conversationId }, data: { activeBranchId: root.id } });
   return root;
 }
