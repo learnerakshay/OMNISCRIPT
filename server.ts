@@ -21,7 +21,7 @@ import {
   serverDeleteBranch,
   ValidationError
 } from "./src/actions/chat-actions";
-import { calculatorInputSchema, executeTool, getRegisteredToolNames, normalizeToolCall, parseToolArguments, ToolExecutionResult, webSearchInputSchema } from "./src/lib/tools/registry";
+import { calculatorInputSchema, executeTool, getRegisteredToolNames, normalizeToolCall, normalizeWebSearchQuery, parseToolArguments, ToolExecutionResult, webSearchInputSchema } from "./src/lib/tools/registry";
 
 // Vite loads .env.local for the browser, but the Express process is started by tsx.
 // Load local server configuration without overriding platform-injected environment variables.
@@ -378,6 +378,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         content: text
       };
     });
+    const latestUserPrompt = [...messages].reverse().find((message) => message.role === "USER")?.content ?? "";
 
     const calculatorToolDefinition = {
       description: "Calculate arithmetic. Required input: { expression: string }, containing the complete expression such as 24 * 18.",
@@ -395,7 +396,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
     const initialResponse = await generateText({
       model: getOpenAIModel(),
       messages: coreMessages,
-      system: `You are OMNISCRIPT. Today is ${currentDate}. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {"expression":"24 * 18"}. Use currentDateTime only for current date/time requests. Use webSearch proactively for facts that may have changed, including current events, prices, sports results, elections, officeholders, releases, and externally verifiable claims. Its query must be a specific, non-empty search phrase that preserves the user's stated competition, category, place, and year. Do not invent a year or category. If a request could refer to multiple competition editions, categories, or time periods and the user has not identified one, ask one concise clarification instead of calling webSearch. Answer normally only when the answer does not require current or externally verified information.`,
+      system: `You are OMNISCRIPT. Current UTC date: ${currentDate}. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {"expression":"24 * 18"}. Use currentDateTime only for current date/time requests. Use webSearch proactively for facts that may have changed, including current events, prices, sports results, elections, officeholders, releases, and externally verifiable claims. Dynamic facts must be verified with webSearch, never answered from model memory alone. Its query must preserve the user's exact named entity, competition, category, place, and any explicitly stated year. Never infer, add, or substitute a year. For latest/current/recent requests, search for the latest completed or official result without adding a year unless the user supplied it. If a request could refer to multiple competition editions, categories, or time periods and the user has not identified one, ask one concise clarification instead of calling webSearch. Answer normally only when the answer does not require current or externally verified information.`,
       tools: {
         calculator: {
           ...calculatorToolDefinition,
@@ -447,7 +448,10 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         return;
       }
 
-      const toolArgs = parsedToolArgs.data as { expression?: string; timezone?: string; query?: string };
+      let toolArgs = parsedToolArgs.data as { expression?: string; timezone?: string; query?: string };
+      if (toolName === "webSearch" && toolArgs.query) {
+        toolArgs = { ...toolArgs, query: normalizeWebSearchQuery(toolArgs.query, latestUserPrompt) };
+      }
 
       if (toolName === "calculator") {
         const query = toolArgs.expression || "";

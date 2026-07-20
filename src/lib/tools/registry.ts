@@ -35,9 +35,30 @@ type SearchIntent = {
   isFreshnessSensitive: boolean;
 };
 
+const YEAR_PATTERN = /\b(?:19|20)\d{2}\b/g;
+const FRESHNESS_PATTERN = /\b(current|currently|latest|most recent|recent|today|yesterday|tomorrow|this week|this month|live|price|score|standing|election|news)\b/i;
+const COMPETITION_RESULT_PATTERN = /\b(won|winner|champion|championship|final|result)\b/i;
+
+export function normalizeWebSearchQuery(modelQuery: string, userPrompt: string): string {
+  const normalizedModelQuery = modelQuery.replace(/\s+/g, " ").trim();
+  const normalizedUserPrompt = userPrompt.replace(/\s+/g, " ").trim();
+  const isFreshnessRequest = FRESHNESS_PATTERN.test(normalizedUserPrompt);
+  const explicitYears = new Set(normalizedUserPrompt.match(YEAR_PATTERN) ?? []);
+
+  let query = normalizedModelQuery.replace(YEAR_PATTERN, (year) => explicitYears.has(year) ? year : "");
+  query = query.replace(/\s+/g, " ").trim();
+
+  if (isFreshnessRequest && COMPETITION_RESULT_PATTERN.test(query)) {
+    query = query.replace(/\b(?:latest|most recent|recent|current)\b/i, "latest completed");
+    if (!/\bofficial\b/i.test(query)) query = `${query} official result`;
+  }
+
+  return query || normalizedUserPrompt;
+}
+
 function getSearchIntent(query: string): SearchIntent {
   const normalizedQuery = query.replace(/\s+/g, " ").trim();
-  const isFreshnessSensitive = /\b(current|currently|latest|recent|today|yesterday|tomorrow|this week|this month|live|price|score|standing|election|news)\b/i.test(normalizedQuery);
+  const isFreshnessSensitive = FRESHNESS_PATTERN.test(normalizedQuery);
   const currentDate = new Date().toISOString().slice(0, 10);
   const effectiveQuery = isFreshnessSensitive
     ? `${normalizedQuery} (current as of ${currentDate})`
@@ -53,16 +74,38 @@ function getSearchIntent(query: string): SearchIntent {
 function requiresCompetitionClarification(query: string): boolean {
   const requestsWinner = /\b(won|winner|champion|championship|title holder)\b/i.test(query);
   const identifiesEdition = /\b(?:19|20)\d{2}\b|\bmen'?s\b|\bwomen'?s\b|\bunder[- ]?\d+\b|\bu[- ]?\d+\b|\bedition\b/i.test(query);
-  return requestsWinner && !identifiesEdition;
+  return requestsWinner && !identifiesEdition && !FRESHNESS_PATTERN.test(query);
 }
 
 function getAuthorityScore(url: string): number {
   const hostname = new URL(url).hostname.toLowerCase();
+  if (["reddit.com", "x.com", "facebook.com", "instagram.com", "tiktok.com"].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return -100;
   if (hostname.endsWith(".gov")) return 50;
   if (hostname.endsWith(".edu")) return 40;
+  if (hostname.endsWith(".int")) return 35;
   if (["reuters.com", "apnews.com", "bbc.com", "nytimes.com", "theguardian.com"].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return 30;
   if (hostname.includes("official")) return 20;
   return 0;
+}
+
+function shouldRefineStaleCompetitionSearch(intent: SearchIntent, results: WebSearchResult[]): boolean {
+  if (!intent.isFreshnessSensitive || !COMPETITION_RESULT_PATTERN.test(intent.effectiveQuery) || /\b(?:19|20)\d{2}\b/.test(intent.effectiveQuery)) return false;
+  const currentYear = new Date().getUTCFullYear();
+  const resultYears = results
+    .flatMap((result) => `${result.title} ${result.snippet}`.match(YEAR_PATTERN) ?? [])
+    .map(Number);
+  return resultYears.length > 0 && resultYears.every((year) => year < currentYear - 1);
+}
+
+function buildRefinedSearchQuery(query: string): string {
+  const withoutDateContext = query.replace(/\s*\(current as of \d{4}-\d{2}-\d{2}\)\s*/i, " ").trim();
+  const completedQuery = /\blatest completed\b/i.test(withoutDateContext)
+    ? withoutDateContext
+    : withoutDateContext.replace(/\b(?:latest|most recent|recent|current)\b/i, "latest completed");
+  const withOfficialResult = /\bofficial result\b/i.test(completedQuery)
+    ? completedQuery
+    : `${completedQuery} official result`;
+  return `${withOfficialResult} (current as of ${new Date().toISOString().slice(0, 10)})`;
 }
 
 function rankSearchResults(results: WebSearchResult[], freshnessSensitive: boolean): WebSearchResult[] {
@@ -180,11 +223,40 @@ async function executeWebSearch(input: unknown, signal?: AbortSignal): Promise<T
       : null;
     if (!rawResults) return { success: false, error: "Web search returned an invalid response." };
 
-    const results = rankSearchResults(
+    let results = rankSearchResults(
       rawResults.map(toSafeSearchResult).filter((result): result is WebSearchResult => result !== null),
       intent.isFreshnessSensitive,
     ).slice(0, 5);
     if (results.length === 0) return { success: false, error: "Web search returned no usable results." };
+
+    if (shouldRefineStaleCompetitionSearch(intent, results)) {
+      const refinedResponse = await fetch(TAVILY_SEARCH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query: buildRefinedSearchQuery(intent.effectiveQuery),
+          topic: "news",
+          days: 30,
+          search_depth: "advanced",
+          max_results: 6,
+          include_answer: false,
+          include_raw_content: false,
+        }),
+        signal: requestSignal,
+      });
+      if (!refinedResponse.ok) return { success: false, error: "Web search could not verify a current result. Please try again shortly." };
+
+      const refinedPayload: unknown = await refinedResponse.json();
+      const refinedRawResults = refinedPayload && typeof refinedPayload === "object" && Array.isArray((refinedPayload as Record<string, unknown>).results)
+        ? (refinedPayload as Record<string, unknown>).results as unknown[]
+        : [];
+      results = rankSearchResults(
+        refinedRawResults.map(toSafeSearchResult).filter((result): result is WebSearchResult => result !== null),
+        true,
+      ).slice(0, 5);
+      if (results.length === 0) return { success: false, error: "Web search could not verify a current result. Please try again shortly." };
+    }
     const result: ToolExecutionResult = {
       success: true,
       summary: `Found ${results.length} web results for ${parsed.data.query}`,
