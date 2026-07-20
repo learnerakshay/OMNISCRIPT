@@ -294,6 +294,12 @@ export function useCreateBranch() {
   return useMutation<BranchMetadata, Error, { conversationId: string; forkMessageId: string }>({
     mutationFn: ({ conversationId, forkMessageId }) => authenticatedFetch<BranchMetadata>(`/api/conversations/${conversationId}/branches`, { method: "POST", body: JSON.stringify({ forkMessageId }) }, getToken),
     onSuccess: (branch) => {
+      queryClient.setQueryData<ConversationBranches>(chatKeys.branches(branch.conversationId), (current) => ({
+        activeBranchId: branch.id,
+        branches: current?.branches.some((item) => item.id === branch.id)
+          ? current.branches
+          : [...(current?.branches ?? []), branch],
+      }));
       queryClient.invalidateQueries({ queryKey: chatKeys.branches(branch.conversationId) });
       queryClient.invalidateQueries({ queryKey: chatKeys.conversation(branch.conversationId) });
     },
@@ -306,6 +312,10 @@ export function useSetActiveBranch() {
   return useMutation<Conversation, Error, { conversationId: string; branchId: string }>({
     mutationFn: ({ conversationId, branchId }) => authenticatedFetch<Conversation>(`/api/conversations/${conversationId}/active-branch`, { method: "PATCH", body: JSON.stringify({ branchId }) }, getToken),
     onSuccess: (conversation) => {
+      queryClient.setQueryData<ConversationBranches>(chatKeys.branches(conversation.id), (current) => current
+        ? { ...current, activeBranchId: conversation.activeBranchId ?? current.activeBranchId }
+        : current,
+      );
       queryClient.invalidateQueries({ queryKey: chatKeys.branches(conversation.id) });
       queryClient.invalidateQueries({ queryKey: chatKeys.conversation(conversation.id) });
     },
@@ -317,7 +327,14 @@ export function useDeleteBranch() {
   const queryClient = useQueryClient();
   return useMutation<{ deletedBranchId: string; activeBranchId: string | null }, Error, { conversationId: string; branchId: string }>({
     mutationFn: ({ conversationId, branchId }) => authenticatedFetch<{ deletedBranchId: string; activeBranchId: string | null }>(`/api/conversations/${conversationId}/branches/${branchId}`, { method: "DELETE" }, getToken),
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData<ConversationBranches>(chatKeys.branches(variables.conversationId), (current) => current
+        ? {
+          activeBranchId: result.activeBranchId ?? current.activeBranchId,
+          branches: current.branches.filter((branch) => branch.id !== result.deletedBranchId),
+        }
+        : current,
+      );
       queryClient.invalidateQueries({ queryKey: chatKeys.branches(variables.conversationId) });
       queryClient.invalidateQueries({ queryKey: chatKeys.messages(variables.conversationId) });
       queryClient.invalidateQueries({ queryKey: chatKeys.conversation(variables.conversationId) });
