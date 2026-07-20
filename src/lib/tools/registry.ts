@@ -20,9 +20,85 @@ export const webSearchInputSchema = z.object({
     .describe("The complete, specific search query to look up on the live web."),
 });
 
-type WebSearchResult = { title: string; url: string; snippet: string };
+type WebSearchResult = { title: string; url: string; snippet: string; publishedDate?: string; score?: number };
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 const WEB_SEARCH_TIMEOUT_MS = 8_000;
+const WEB_SEARCH_CACHE_TTL_MS = 5 * 60_000;
+const FRESH_SEARCH_CACHE_TTL_MS = 60_000;
+const MAX_WEB_SEARCH_ATTEMPTS = 2;
+const MAX_WEB_SEARCH_CACHE_ENTRIES = 100;
+const webSearchCache = new Map<string, { expiresAt: number; result: ToolExecutionResult }>();
+
+type SearchIntent = {
+  effectiveQuery: string;
+  cacheKey: string;
+  isFreshnessSensitive: boolean;
+};
+
+function getSearchIntent(query: string): SearchIntent {
+  const normalizedQuery = query.replace(/\s+/g, " ").trim();
+  const isFreshnessSensitive = /\b(current|currently|latest|recent|today|yesterday|tomorrow|this week|this month|live|price|score|standing|election|news)\b/i.test(normalizedQuery);
+  const currentDate = new Date().toISOString().slice(0, 10);
+  const effectiveQuery = isFreshnessSensitive
+    ? `${normalizedQuery} (current as of ${currentDate})`
+    : normalizedQuery;
+
+  return {
+    effectiveQuery,
+    cacheKey: `${isFreshnessSensitive ? "fresh" : "standard"}:${effectiveQuery.toLocaleLowerCase("en-US")}`,
+    isFreshnessSensitive,
+  };
+}
+
+function requiresCompetitionClarification(query: string): boolean {
+  const requestsWinner = /\b(won|winner|champion|championship|title holder)\b/i.test(query);
+  const identifiesEdition = /\b(?:19|20)\d{2}\b|\bmen'?s\b|\bwomen'?s\b|\bunder[- ]?\d+\b|\bu[- ]?\d+\b|\bedition\b/i.test(query);
+  return requestsWinner && !identifiesEdition;
+}
+
+function getAuthorityScore(url: string): number {
+  const hostname = new URL(url).hostname.toLowerCase();
+  if (hostname.endsWith(".gov")) return 50;
+  if (hostname.endsWith(".edu")) return 40;
+  if (["reuters.com", "apnews.com", "bbc.com", "nytimes.com", "theguardian.com"].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return 30;
+  if (hostname.includes("official")) return 20;
+  return 0;
+}
+
+function rankSearchResults(results: WebSearchResult[], freshnessSensitive: boolean): WebSearchResult[] {
+  return [...results].sort((left, right) => {
+    const authorityDifference = getAuthorityScore(right.url) - getAuthorityScore(left.url);
+    if (authorityDifference !== 0) return authorityDifference;
+    if (freshnessSensitive) {
+      const rightDate = right.publishedDate ? Date.parse(right.publishedDate) : 0;
+      const leftDate = left.publishedDate ? Date.parse(left.publishedDate) : 0;
+      if (rightDate !== leftDate) return rightDate - leftDate;
+    }
+    return (right.score ?? 0) - (left.score ?? 0);
+  });
+}
+
+function waitForRetry(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, 250);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new Error("Tool execution was cancelled."));
+    }, { once: true });
+  });
+}
+
+function cacheWebSearchResult(cacheKey: string, result: ToolExecutionResult, ttl: number) {
+  const now = Date.now();
+  for (const [key, entry] of webSearchCache) {
+    if (entry.expiresAt <= now) webSearchCache.delete(key);
+  }
+  if (!webSearchCache.has(cacheKey) && webSearchCache.size >= MAX_WEB_SEARCH_CACHE_ENTRIES) {
+    const oldestKey = webSearchCache.keys().next().value;
+    if (oldestKey) webSearchCache.delete(oldestKey);
+  }
+  webSearchCache.set(cacheKey, { expiresAt: now + ttl, result });
+}
 
 function toSafeSearchResult(value: unknown): WebSearchResult | null {
   if (!value || typeof value !== "object") return null;
@@ -35,6 +111,8 @@ function toSafeSearchResult(value: unknown): WebSearchResult | null {
       title: result.title.trim().slice(0, 300) || url.hostname,
       url: url.toString(),
       snippet: typeof result.content === "string" ? result.content.trim().slice(0, 600) : "",
+      publishedDate: typeof result.published_date === "string" ? result.published_date.trim().slice(0, 100) : undefined,
+      score: typeof result.score === "number" && Number.isFinite(result.score) ? result.score : undefined,
     };
   } catch {
     return null;
@@ -45,31 +123,54 @@ async function executeWebSearch(input: unknown, signal?: AbortSignal): Promise<T
   const parsed = webSearchInputSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message || "Web search arguments are invalid." };
 
+  if (requiresCompetitionClarification(parsed.data.query)) {
+    return { success: false, error: "This request could refer to multiple competition editions or categories. Please specify the year and, when applicable, the competition category." };
+  }
+
   const apiKey = process.env.TAVILY_API_KEY?.trim();
   if (!apiKey) return { success: false, error: "Web search is not configured. Set TAVILY_API_KEY on the server." };
+
+  const intent = getSearchIntent(parsed.data.query);
+  const cached = webSearchCache.get(intent.cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
+  if (cached) webSearchCache.delete(intent.cacheKey);
 
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => timeoutController.abort(), WEB_SEARCH_TIMEOUT_MS);
   const requestSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
 
   try {
-    const response = await fetch(TAVILY_SEARCH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query: parsed.data.query,
-        search_depth: "basic",
-        max_results: 5,
-        include_answer: false,
-        include_raw_content: false,
-      }),
-      signal: requestSignal,
-    });
+    let response: Response | undefined;
+    for (let attempt = 1; attempt <= MAX_WEB_SEARCH_ATTEMPTS; attempt += 1) {
+      try {
+        response = await fetch(TAVILY_SEARCH_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: apiKey,
+            query: intent.effectiveQuery,
+            topic: intent.isFreshnessSensitive ? "news" : "general",
+            days: intent.isFreshnessSensitive ? 30 : undefined,
+            search_depth: intent.isFreshnessSensitive ? "advanced" : "basic",
+            max_results: 6,
+            include_answer: false,
+            include_raw_content: false,
+          }),
+          signal: requestSignal,
+        });
+      } catch (error) {
+        if (requestSignal.aborted || attempt === MAX_WEB_SEARCH_ATTEMPTS) throw error;
+        await waitForRetry(requestSignal);
+        continue;
+      }
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) return { success: false, error: "Web search authentication failed. Verify TAVILY_API_KEY on the server." };
-      if (response.status === 429) return { success: false, error: "Web search is temporarily rate limited. Please try again shortly." };
+      if (response.ok || response.status === 401 || response.status === 403 || response.status === 429 || attempt === MAX_WEB_SEARCH_ATTEMPTS) break;
+      await waitForRetry(requestSignal);
+    }
+
+    if (!response?.ok) {
+      if (response?.status === 401 || response?.status === 403) return { success: false, error: "Web search authentication failed. Verify TAVILY_API_KEY on the server." };
+      if (response?.status === 429) return { success: false, error: "Web search is temporarily rate limited. Please try again shortly." };
       return { success: false, error: "Web search is temporarily unavailable. Please try again." };
     }
 
@@ -79,9 +180,23 @@ async function executeWebSearch(input: unknown, signal?: AbortSignal): Promise<T
       : null;
     if (!rawResults) return { success: false, error: "Web search returned an invalid response." };
 
-    const results = rawResults.map(toSafeSearchResult).filter((result): result is WebSearchResult => result !== null).slice(0, 5);
+    const results = rankSearchResults(
+      rawResults.map(toSafeSearchResult).filter((result): result is WebSearchResult => result !== null),
+      intent.isFreshnessSensitive,
+    ).slice(0, 5);
     if (results.length === 0) return { success: false, error: "Web search returned no usable results." };
-    return { success: true, summary: `Found ${results.length} web results for ${parsed.data.query}`, result: { query: parsed.data.query, results } };
+    const result: ToolExecutionResult = {
+      success: true,
+      summary: `Found ${results.length} web results for ${parsed.data.query}`,
+      result: {
+        query: parsed.data.query,
+        effectiveQuery: intent.effectiveQuery,
+        freshnessSensitive: intent.isFreshnessSensitive,
+        results,
+      },
+    };
+    cacheWebSearchResult(intent.cacheKey, result, intent.isFreshnessSensitive ? FRESH_SEARCH_CACHE_TTL_MS : WEB_SEARCH_CACHE_TTL_MS);
+    return result;
   } catch (error) {
     if (timeoutController.signal.aborted && !signal?.aborted) return { success: false, error: "Web search timed out. Please try again." };
     if (signal?.aborted) return { success: false, error: "Tool execution was cancelled." };

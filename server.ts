@@ -383,6 +383,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
       description: "Calculate arithmetic. Required input: { expression: string }, containing the complete expression such as 24 * 18.",
       inputSchema: calculatorInputSchema,
     };
+    const currentDate = new Date().toISOString().slice(0, 10);
     console.info(JSON.stringify({
       event: "calculator_tool_schema",
       calculatorToolDefinitionKeys: Object.keys(calculatorToolDefinition),
@@ -394,7 +395,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
     const initialResponse = await generateText({
       model: getOpenAIModel(),
       messages: coreMessages,
-      system: "You are OMNISCRIPT. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {\"expression\":\"24 * 18\"}. Use currentDateTime only for current date/time requests. Use webSearch only when current, time-sensitive, or externally verifiable web information is needed; its query field must be specific and non-empty. Answer normally otherwise.",
+      system: `You are OMNISCRIPT. Today is ${currentDate}. Use calculator only for arithmetic. Calculator calls must include exactly a non-empty expression field containing the complete arithmetic expression, for example {"expression":"24 * 18"}. Use currentDateTime only for current date/time requests. Use webSearch proactively for facts that may have changed, including current events, prices, sports results, elections, officeholders, releases, and externally verifiable claims. Its query must be a specific, non-empty search phrase that preserves the user's stated competition, category, place, and year. Do not invent a year or category. If a request could refer to multiple competition editions, categories, or time periods and the user has not identified one, ask one concise clarification instead of calling webSearch. Answer normally only when the answer does not require current or externally verified information.`,
       tools: {
         calculator: {
           ...calculatorToolDefinition,
@@ -404,7 +405,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
           parameters: readUrlParameters,
         } as any,
         webSearch: {
-          description: "Search the live web for current information. Required input: { query: string }, containing a specific search query.",
+          description: "Search authoritative live web sources for current or externally verifiable information. Required input: { query: string }, containing a specific query with the known event, category, place, and year. Do not use this tool for an ambiguous winner or champion question without an identified edition/category; ask for clarification instead.",
           inputSchema: webSearchInputSchema,
         } as any,
       } as any,
@@ -626,7 +627,7 @@ app.post("/api/conversations/:id/stream", requireAuth as any, async (req: Authen
         const { textStream } = await streamText({
           model: getOpenAIModel(),
           messages: updatedMessages,
-          system: "You are OMNISCRIPT. Answer the user's request using the provided web search results. Be precise about time-sensitive facts, distinguish uncertainty when evidence is incomplete, and never claim information not supported by the results. Do not output raw JSON or raw URLs.",
+          system: `You are OMNISCRIPT. Today is ${currentDate}. Answer only from the provided web search results, not model memory. Prefer the highest-quality, most directly relevant sources and use publication dates when present for time-sensitive facts. Do not combine results from different competitions, categories, editions, or time periods. If the results are incomplete, conflicting, or the tool failed, clearly say what could not be verified and ask the user for the missing clarification or to retry; do not guess. Do not output raw JSON or raw URLs.`,
           abortSignal: abortController.signal,
         });
 
