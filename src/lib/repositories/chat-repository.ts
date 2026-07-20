@@ -20,6 +20,26 @@ export interface DeleteMessageResult {
   nextActiveBranchId: string | null;
 }
 
+function toBranchMetadata(branches: ConversationBranch[]): BranchMetadata[] {
+  const siblingsByForkMessage = new Map<string, ConversationBranch[]>();
+  for (const branch of branches) {
+    if (!branch.forkMessageId) continue;
+    const siblings = siblingsByForkMessage.get(branch.forkMessageId) ?? [];
+    siblings.push(branch);
+    siblingsByForkMessage.set(branch.forkMessageId, siblings);
+  }
+
+  return branches.map((branch) => {
+    if (!branch.forkMessageId) return { ...branch, siblingCount: 1, siblingIndex: 0 };
+    const siblings = siblingsByForkMessage.get(branch.forkMessageId) ?? [];
+    return {
+      ...branch,
+      siblingCount: siblings.length,
+      siblingIndex: Math.max(0, siblings.findIndex((item) => item.id === branch.id)),
+    };
+  });
+}
+
 async function validateOwnership(id: string, userId: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<Conversation> {
   const conversation = await client.conversation.findUnique({ where: { id } });
   if (!conversation) throw new NotFoundError("Conversation not found.");
@@ -95,8 +115,7 @@ export async function getConversationBranches(conversationId: string, userId: st
   await validateOwnership(conversationId, userId);
   const root = await ensureRootBranch(conversationId);
   const branches = await prisma.conversationBranch.findMany({ where: { conversationId }, orderBy: [{ forkMessageId: "asc" }, { siblingOrder: "asc" }, { createdAt: "asc" }] });
-  const metadata = await Promise.all(branches.map((branch) => getBranchMetadata(conversationId, branch.id)));
-  return { activeBranchId: root.id, branches: metadata };
+  return { activeBranchId: root.id, branches: toBranchMetadata(branches) };
 }
 
 export async function getBranchMessages(conversationId: string, userId: string, requestedBranchId?: string): Promise<{ branch: BranchMetadata; messages: Message[] }> {
@@ -124,12 +143,17 @@ export async function getBranchMessages(conversationId: string, userId: string, 
 }
 
 export async function createBranch(conversationId: string, userId: string, forkMessageId: string): Promise<BranchMetadata> {
+  // Resolve the visible path before opening the short write transaction. The
+  // recursive lineage query can grow with conversation length and must not
+  // consume the interactive transaction timeout in production.
+  const path = await getBranchMessages(conversationId, userId);
+  if (!path.messages.some((message) => message.id === forkMessageId)) {
+    throw new ConflictError("The selected message is not visible in the active branch.");
+  }
+
   return prisma.$transaction(async (tx) => {
     await validateOwnership(conversationId, userId, tx);
-    const active = await ensureRootBranch(conversationId, tx);
-    const source = await requireBranch(conversationId, active.id, tx);
-    const path = await getBranchMessages(conversationId, userId, source.id);
-    if (!path.messages.some((message) => message.id === forkMessageId)) throw new ConflictError("The selected message is not visible in the active branch.");
+    const source = await requireBranch(conversationId, path.branch.id, tx);
     const forkMessage = await tx.message.findFirst({ where: { id: forkMessageId, conversationId } });
     if (!forkMessage) throw new NotFoundError("Message not found.");
     await tx.$queryRaw(Prisma.sql`SELECT id FROM "messages" WHERE id = ${forkMessageId} FOR UPDATE`);

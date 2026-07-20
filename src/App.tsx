@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type PointerEvent as ReactPointerEvent } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { 
   Sparkles, 
@@ -260,7 +260,9 @@ export default function App() {
   const [composerText, setComposerText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContentRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isCreatingBranchRef = useRef(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   // Streaming AI states
@@ -290,44 +292,70 @@ export default function App() {
     }
   }, [composerText]);
 
-  // Scroll to bottom helper
-  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior });
+  const updateScrollBottomState = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const remainingDistance = Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight);
+    const isAtBottom = remainingDistance <= 16;
+    setShowScrollBottom((current) => current === !isAtBottom ? current : !isAtBottom);
+
+    if (isStreaming) {
+      setUserHasScrolledUp((current) => current === !isAtBottom ? current : !isAtBottom);
     }
-  };
+  }, [isStreaming]);
+
+  // Scroll to the actual chat viewport bottom rather than relying on an
+  // ancestor selected by scrollIntoView, then reconcile the measured state.
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    requestAnimationFrame(updateScrollBottomState);
+  }, [updateScrollBottomState]);
 
   // Auto-scroll messages container to bottom on new message or conversation selection
   useEffect(() => {
     if (settings.autoScroll) {
       scrollToBottom("smooth");
     }
-  }, [messages, isLoadingMessages, settings.autoScroll]);
+  }, [messages, isLoadingMessages, settings.autoScroll, scrollToBottom]);
 
   // Auto-scroll messages container to bottom on active streaming updates
   useEffect(() => {
     if (settings.autoScroll && isStreaming && !userHasScrolledUp) {
       scrollToBottom("auto");
     }
-  }, [streamingText, isStreaming, userHasScrolledUp, settings.autoScroll]);
+  }, [streamingText, isStreaming, userHasScrolledUp, settings.autoScroll, scrollToBottom]);
 
-  // Handle scroll to show/hide scroll-to-bottom button
-  const handleScroll = () => {
-    if (scrollContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-      // Show button if user scrolls up more than 150px
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
-      setShowScrollBottom(!isNearBottom);
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
 
-      if (isStreaming) {
-        if (!isNearBottom) {
-          setUserHasScrolledUp(true);
-        } else {
-          setUserHasScrolledUp(false);
-        }
-      }
-    }
-  };
+    let animationFrame: number | null = null;
+    const updateAfterLayout = () => {
+      if (animationFrame !== null) return;
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = null;
+        updateScrollBottomState();
+      });
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateAfterLayout);
+    observer?.observe(container);
+    if (messagesContentRef.current) observer?.observe(messagesContentRef.current);
+    window.addEventListener("resize", updateAfterLayout);
+    window.visualViewport?.addEventListener("resize", updateAfterLayout);
+    updateAfterLayout();
+
+    return () => {
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+      observer?.disconnect();
+      window.removeEventListener("resize", updateAfterLayout);
+      window.visualViewport?.removeEventListener("resize", updateAfterLayout);
+    };
+  }, [selectedConvId, isStartupInitializationComplete, updateScrollBottomState]);
+
+  const handleScroll = updateScrollBottomState;
 
 
   // Register modern keyboard shortcuts
@@ -550,13 +578,16 @@ export default function App() {
   };
 
   const handleCreateBranch = async (messageId: string) => {
-    if (!selectedConvId || createBranch.isPending || isStreaming) return;
+    if (!selectedConvId || isCreatingBranchRef.current || createBranch.isPending || isStreaming) return;
+    isCreatingBranchRef.current = true;
     try {
       const branch = await createBranch.mutateAsync({ conversationId: selectedConvId, forkMessageId: messageId });
       setActiveBranchId(branch.id);
       toast({ title: "Branch Created", description: "A new continuation is now active.", variant: "success" });
     } catch (error) {
       toast({ title: "Failed to Create Branch", description: error instanceof Error ? error.message : "Unable to create a branch.", variant: "error" });
+    } finally {
+      isCreatingBranchRef.current = false;
     }
   };
 
@@ -906,7 +937,7 @@ export default function App() {
               onScroll={handleScroll}
               className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 md:px-8 space-y-4 sm:space-y-6 custom-scrollbar flex justify-center bg-linear-to-b from-background to-muted/5"
             >
-              <div className="w-full max-w-3xl flex flex-col min-h-full">
+              <div ref={messagesContentRef} className="w-full max-w-3xl flex flex-col min-h-full">
                 <AnimatePresence mode="wait">
                   {shouldShowLandingHero ? (
                     /* EMPTY/LANDING STATE GREETINGS */
