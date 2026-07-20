@@ -49,7 +49,6 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { useSounds } from "./hooks/use-sounds";
 
 const TITLE_STOP_WORDS = new Set(["a", "an", "and", "are", "be", "brief", "can", "explain", "give", "in", "is", "it", "me", "of", "please", "tell", "the", "to", "what", "with", "you"]);
-const MINIMUM_SPLASH_DURATION_MS = 3300;
 
 function createConciseTitle(prompt: string): string {
   const normalized = prompt.replace(/[^a-zA-Z0-9/]+/g, " ").trim();
@@ -71,7 +70,6 @@ export default function App() {
   const { settings } = useUserSettings();
   const { playSound } = useSounds();
   const [isHeaderRippling, setIsHeaderRippling] = useState(false);
-  const [hasMinimumSplashElapsed, setHasMinimumSplashElapsed] = useState(false);
   const authPageRef = useRef<HTMLDivElement>(null);
   const loginGlowRef = useRef<HTMLDivElement>(null);
   const touchGlowFrameRef = useRef<number>(0);
@@ -80,11 +78,6 @@ export default function App() {
   const activeTouchPointerIdRef = useRef<number | null>(null);
   const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   const isUsingFallbackKey = !clerkPublishableKey?.trim();
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setHasMinimumSplashElapsed(true), MINIMUM_SPLASH_DURATION_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     if (user || typeof window === "undefined") return;
@@ -186,7 +179,7 @@ export default function App() {
   };
 
   // React Query Hook integrations
-  const { data: conversations, isLoading: isLoadingConversations, refetch: refetchConversations } = useConversations();
+  const { data: conversations, isLoading: isLoadingConversations } = useConversations();
   const createConversation = useCreateConversation();
   const updateConversationTitle = useUpdateConversationTitle();
   const deleteConversation = useDeleteConversation();
@@ -355,7 +348,7 @@ export default function App() {
   }, [isSettingsOpen, isMobileDrawerOpen, settings.keyboardNavigation]);
 
   // Centered, premium loading experience centered on the OMNISCRIPT logo
-  if (!isLoaded || !hasMinimumSplashElapsed) {
+  if (!isLoaded) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center relative select-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -387,6 +380,23 @@ export default function App() {
     );
   }
 
+  const createEmptyConversation = async (title?: string) => {
+    const conversation = await createConversation.mutateAsync({ title });
+    const branchId = conversation.activeBranchId;
+
+    if (branchId) {
+      queryClient.setQueryData(chatKeys.messages(conversation.id, branchId), []);
+      queryClient.setQueryData(chatKeys.branches(conversation.id), {
+        activeBranchId: branchId,
+        branches: [],
+      });
+      setActiveBranchId(branchId);
+    }
+
+    setSelectedConvId(conversation.id);
+    return conversation;
+  };
+
   // Submit new message to active conversation and stream the AI response
   const handleSubmitMessage = async (textToSend: string) => {
     const cleanText = textToSend.trim();
@@ -400,9 +410,8 @@ export default function App() {
       if (!activeId) {
         const autoTitle = createConciseTitle(cleanText);
           
-        const newConv = await createConversation.mutateAsync({ title: autoTitle });
+        const newConv = await createEmptyConversation(autoTitle);
         activeId = newConv.id;
-        setSelectedConvId(activeId);
       }
 
       setComposerText("");
@@ -699,11 +708,7 @@ export default function App() {
               isLoading={isLoadingConversations}
               selectedId={selectedConvId}
               onSelect={setSelectedConvId}
-              onCreate={(title) => {
-                createConversation.mutate({ title }, {
-                  onSuccess: (data) => setSelectedConvId(data.id)
-                });
-              }}
+              onCreate={(title) => { void createEmptyConversation(title); }}
               isCreatePending={createConversation.isPending}
               onRename={(id, title) => updateConversationTitle.mutate({ id, title })}
               onDelete={(id) => {
@@ -750,12 +755,9 @@ export default function App() {
                       setMobileDrawerOpen(false);
                     }}
                     onCreate={(title) => {
-                      createConversation.mutate({ title }, {
-                        onSuccess: (data) => {
-                          setSelectedConvId(data.id);
-                          setMobileDrawerOpen(false);
-                        }
-                      });
+                      void createEmptyConversation(title)
+                        .then(() => setMobileDrawerOpen(false))
+                        .catch(() => undefined);
                     }}
                     isCreatePending={createConversation.isPending}
                     onRename={(id, title) => updateConversationTitle.mutate({ id, title })}

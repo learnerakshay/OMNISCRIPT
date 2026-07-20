@@ -129,8 +129,7 @@ export function useCreateConversation() {
         body: JSON.stringify(data),
       }, getToken),
     onSuccess: (data) => {
-      // Invalidate list to trigger fresh background reload
-      queryClient.invalidateQueries({ queryKey: chatKeys.conversations() });
+      queryClient.setQueryData<Conversation[]>(chatKeys.conversations(), (current = []) => [data, ...current.filter((conversation) => conversation.id !== data.id)]);
       toast({
         title: "Conversation Created",
         description: `"${data.title || 'Untitled Chat'}" is ready for collaboration.`,
