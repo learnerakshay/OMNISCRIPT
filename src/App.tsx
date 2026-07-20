@@ -49,6 +49,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { useSounds } from "./hooks/use-sounds";
 
 const TITLE_STOP_WORDS = new Set(["a", "an", "and", "are", "be", "brief", "can", "explain", "give", "in", "is", "it", "me", "of", "please", "tell", "the", "to", "what", "with", "you"]);
+const MINIMUM_STARTUP_ANIMATION_MS = 3_000;
 
 function createConciseTitle(prompt: string): string {
   const normalized = prompt.replace(/[^a-zA-Z0-9/]+/g, " ").trim();
@@ -70,6 +71,7 @@ export default function App() {
   const { settings } = useUserSettings();
   const { playSound } = useSounds();
   const [isHeaderRippling, setIsHeaderRippling] = useState(false);
+  const [hasMinimumStartupAnimationElapsed, setHasMinimumStartupAnimationElapsed] = useState(false);
   const authPageRef = useRef<HTMLDivElement>(null);
   const loginGlowRef = useRef<HTMLDivElement>(null);
   const touchGlowFrameRef = useRef<number>(0);
@@ -78,6 +80,11 @@ export default function App() {
   const activeTouchPointerIdRef = useRef<number | null>(null);
   const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   const isUsingFallbackKey = !clerkPublishableKey?.trim();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHasMinimumStartupAnimationElapsed(true), MINIMUM_STARTUP_ANIMATION_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (user || typeof window === "undefined") return;
@@ -273,6 +280,7 @@ export default function App() {
     !isConversationResolving &&
     messages?.length === 0
   );
+  const isStartupInitializationComplete = isLoaded && (!user || (!isLoadingConversations && !isConversationResolving));
 
   // Auto-resize composer textarea height
   useEffect(() => {
@@ -355,7 +363,7 @@ export default function App() {
   }, [isSettingsOpen, isMobileDrawerOpen, settings.keyboardNavigation]);
 
   // Centered, premium loading experience centered on the OMNISCRIPT logo
-  if (!isLoaded) {
+  if (!hasMinimumStartupAnimationElapsed || !isStartupInitializationComplete) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center relative select-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
