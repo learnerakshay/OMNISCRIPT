@@ -1,4 +1,5 @@
 import { Conversation, ConversationBranch, Message, MessageRole, Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { prisma } from "../prisma";
 
 export class DatabaseError extends Error { constructor(message: string) { super(message); this.name = "DatabaseError"; } }
@@ -18,6 +19,16 @@ export interface DeleteMessageResult {
   conversationDeleted: boolean;
   conversationEmpty: boolean;
   nextActiveBranchId: string | null;
+}
+
+const MAX_BRANCH_CREATE_ATTEMPTS = 2;
+
+function logBranchOperation(event: string, details: Record<string, string | number | undefined>) {
+  console.info(JSON.stringify({ event, ...details }));
+}
+
+function isSiblingOrderConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 function toBranchMetadata(branches: ConversationBranch[]): BranchMetadata[] {
@@ -143,27 +154,78 @@ export async function getBranchMessages(conversationId: string, userId: string, 
 }
 
 export async function createBranch(conversationId: string, userId: string, forkMessageId: string): Promise<BranchMetadata> {
+  const operationId = randomUUID();
+  const startedAt = Date.now();
+  logBranchOperation("branch_create_started", { operationId, conversationId, forkMessageId });
+
   // Resolve the visible path before opening the short write transaction. The
   // recursive lineage query can grow with conversation length and must not
   // consume the interactive transaction timeout in production.
-  const path = await getBranchMessages(conversationId, userId);
-  if (!path.messages.some((message) => message.id === forkMessageId)) {
-    throw new ConflictError("The selected message is not visible in the active branch.");
+  let path: Awaited<ReturnType<typeof getBranchMessages>>;
+  try {
+    path = await getBranchMessages(conversationId, userId);
+    if (!path.messages.some((message) => message.id === forkMessageId)) {
+      throw new ConflictError("The selected message is not visible in the active branch.");
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "branch_create_failed",
+      operationId,
+      conversationId,
+      forkMessageId,
+      durationMs: Date.now() - startedAt,
+      prismaCode: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined,
+      failureStage: "preflight",
+    }), error);
+    throw error;
   }
 
-  return prisma.$transaction(async (tx) => {
-    await validateOwnership(conversationId, userId, tx);
-    const source = await requireBranch(conversationId, path.branch.id, tx);
-    const forkMessage = await tx.message.findFirst({ where: { id: forkMessageId, conversationId } });
-    if (!forkMessage) throw new NotFoundError("Message not found.");
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM "messages" WHERE id = ${forkMessageId} FOR UPDATE`);
-    const latestSibling = await tx.conversationBranch.aggregate({ where: { conversationId, forkMessageId }, _max: { siblingOrder: true } });
-    const branch = await tx.conversationBranch.create({
-      data: { conversationId, parentBranchId: source.id, forkMessageId, headMessageId: forkMessageId, siblingOrder: (latestSibling._max.siblingOrder ?? -1) + 1 },
-    });
-    await tx.conversation.update({ where: { id: conversationId }, data: { activeBranchId: branch.id } });
-    return getBranchMetadata(conversationId, branch.id, tx);
-  });
+  for (let attempt = 1; attempt <= MAX_BRANCH_CREATE_ATTEMPTS; attempt += 1) {
+    try {
+      const branch = await prisma.$transaction(async (tx) => {
+        await validateOwnership(conversationId, userId, tx);
+        const source = await requireBranch(conversationId, path.branch.id, tx);
+        const forkMessage = await tx.message.findFirst({ where: { id: forkMessageId, conversationId } });
+        if (!forkMessage) throw new NotFoundError("Message not found.");
+
+        // Standard Prisma operations keep this write transaction compatible
+        // with production poolers. A sibling-order conflict is retried with a
+        // completely fresh transaction below; no transaction client escapes.
+        const latestSibling = await tx.conversationBranch.aggregate({ where: { conversationId, forkMessageId }, _max: { siblingOrder: true } });
+        const created = await tx.conversationBranch.create({
+          data: { conversationId, parentBranchId: source.id, forkMessageId, headMessageId: forkMessageId, siblingOrder: (latestSibling._max.siblingOrder ?? -1) + 1 },
+        });
+        await tx.conversation.update({ where: { id: conversationId }, data: { activeBranchId: created.id } });
+        return getBranchMetadata(conversationId, created.id, tx);
+      });
+
+      logBranchOperation("branch_create_completed", {
+        operationId,
+        conversationId,
+        forkMessageId,
+        attempt,
+        durationMs: Date.now() - startedAt,
+        recordsCreated: 1,
+      });
+      return branch;
+    } catch (error) {
+      const canRetry = isSiblingOrderConflict(error) && attempt < MAX_BRANCH_CREATE_ATTEMPTS;
+      console.error(JSON.stringify({
+        event: "branch_create_failed",
+        operationId,
+        conversationId,
+        forkMessageId,
+        attempt,
+        durationMs: Date.now() - startedAt,
+        prismaCode: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined,
+        failureStage: canRetry ? "sibling_order_retry" : "transaction",
+      }), error);
+      if (canRetry) continue;
+      throw error;
+    }
+  }
+
+  throw new DatabaseError("Failed to create a branch.");
 }
 
 export async function setActiveBranch(conversationId: string, userId: string, branchId: string) {
