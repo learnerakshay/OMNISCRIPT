@@ -1,4 +1,4 @@
-git# OMNISCRIPT
+# OMNISCRIPT
 
 OMNISCRIPT began as an extension assignment for a Generative AI JavaScript Cohort. Instead of limiting the work to an incremental ChaiGPT feature, the project became an opportunity to apply the cohort's lessons to a complete standalone AI workspace. The result is a production-style full-stack application with authentication, persistent conversations, chat branching, AI tool calling, and a modern, scalable architecture.
 
